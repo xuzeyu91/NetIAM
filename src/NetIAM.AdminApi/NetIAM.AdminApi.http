@@ -1,0 +1,6 @@
+@NetIAM.AdminApi_HostAddress = http://localhost:5286
+
+GET {{NetIAM.AdminApi_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

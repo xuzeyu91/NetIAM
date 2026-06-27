@@ -1,0 +1,29 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:17
+    container_name: netiam-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: netiam
+    ports:
+      - "5432:5432"
+    volumes:
+      - netiam-postgres-data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7.4
+    container_name: netiam-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - netiam-redis-data:/data
+
+volumes:
+  netiam-postgres-data:
+  netiam-redis-data:

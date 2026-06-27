@@ -1,0 +1,23 @@
+# Build artifacts
+bin/
+obj/
+
+# IDE files
+.vs/
+.vscode/
+*.user
+*.suo
+
+# Node
+node_modules/
+dist/
+*.log
+
+# Local tools/cache
+.DS_Store
+Thumbs.db
+
+# Env files
+.env
+.env.*
+!.env.example

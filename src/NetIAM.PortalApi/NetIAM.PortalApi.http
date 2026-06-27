@@ -1,0 +1,6 @@
+@NetIAM.PortalApi_HostAddress = http://localhost:5241
+
+GET {{NetIAM.PortalApi_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

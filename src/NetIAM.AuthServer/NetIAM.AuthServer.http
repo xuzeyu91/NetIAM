@@ -1,0 +1,6 @@
+@NetIAM.AuthServer_HostAddress = http://localhost:5226
+
+GET {{NetIAM.AuthServer_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
