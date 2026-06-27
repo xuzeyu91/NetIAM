@@ -1,32 +1,27 @@
-# React + TypeScript + Vite
+# NetIAM Portal
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+Self-service portal for NetIAM users. The current implementation covers the first migration slice from eiam Portal:
 
-Currently, two official plugins are available:
+- assigned applications
+- profile update
+- password change
+- identity provider bindings and unbind
+- personal audit timeline
+- personal sessions and revocation
+- DingTalk, Feishu, and WeCom SSO callback debugging
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+The portal still uses the shared debug request context (`X-Tenant-Id`, `X-Acting-User-Id`, `X-Session-Id`, and optional bearer token). A later migration step should replace this with first-class login/session state, route guards, OTP login, and forgot-password flows.
 
-## React Compiler
+## Scripts
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- `npm run dev` starts the Vite dev server.
+- `npm run build` type-checks and builds the portal.
+- `npm run lint` runs oxlint.
 
-## Expanding the Oxlint configuration
+## Environment
 
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
+- `VITE_PORTAL_API_BASE` defaults to `https://localhost:7003`.
+- `VITE_TENANT_ID` defaults to `tenant-default`.
+- `VITE_ACTING_USER_ID` defaults to empty.
 
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
-```
-
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+The same values can be edited in the portal context strip at runtime and are persisted to local storage.

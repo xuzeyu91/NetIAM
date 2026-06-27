@@ -68,6 +68,11 @@
   - organizations support update/delete with tree-path rebuild and child-delete guard
   - apps support update/delete
   - rbac roles support create/delete
+- portal self-service P0 delivered:
+  - `NetIAM.PortalApi` now exposes `/api/portal/me`, `/api/portal/apps`, `/api/portal/bindings`, `/api/portal/audit`, and `/api/portal/sessions`
+  - portal profile update, password change, identity binding unlink, personal audit, and personal session revoke flows are implemented
+  - `web/portal` moved from callback-only debugging to an operable self-service workspace while retaining DingTalk/Feishu/WeCom SSO debugging
+  - account binding resolution now ignores soft-deleted bindings
 - capability baseline document added:
   - `docs/migration/admin-capability-gap.md`
 - EF migration generated successfully:
@@ -77,6 +82,9 @@
 
 ## Remaining Gaps for Next Iteration
 
+- Portal login/session productization: replace debug headers with first-class login state, route guards, OTP, and forgot-password flows.
+- Application domain depth: app groups, app accounts, certificates, OIDC detail config, JWT SSO, and form-fill SSO.
+- eiam-compatible private OpenAPI with token issuance and scoped management endpoints.
 - OIDC/SAML end-session protocol completeness (front-channel logout handshake and full SLO interop).
 - RBAC permission bulk policy templates/operations.
 - CI pipeline integration for sandbox contract/e2e suites with managed secret rotation.

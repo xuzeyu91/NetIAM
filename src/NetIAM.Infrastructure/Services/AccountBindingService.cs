@@ -78,7 +78,7 @@ public sealed class AccountBindingService(
 
         var existingBind = await dbContext.UserIdpBinds
             .FirstOrDefaultAsync(
-                x => x.TenantId == tenantId && x.ThirdPartyUserId == thirdParty.Id,
+                x => x.TenantId == tenantId && x.ThirdPartyUserId == thirdParty.Id && !x.IsDeleted,
                 cancellationToken);
 
         if (existingBind is not null)

@@ -167,7 +167,8 @@ public sealed class ExternalAuthController(
             .FirstOrDefaultAsync(
                 x => x.TenantId == tenantId
                      && x.UserId == user.Id
-                     && x.ThirdPartyUserId == thirdParty.Id,
+                     && x.ThirdPartyUserId == thirdParty.Id
+                     && !x.IsDeleted,
                 cancellationToken);
 
         if (existing is null)
