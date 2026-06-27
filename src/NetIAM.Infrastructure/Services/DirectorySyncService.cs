@@ -214,10 +214,26 @@ public sealed class DirectorySyncService(
             return false;
         }
 
+        var history = new IdentitySourceSyncHistoryEntity
+        {
+            TenantId = tenantId,
+            IdentitySourceId = source.Id,
+            TriggerMode = "webhook",
+            StartedTime = DateTimeOffset.UtcNow,
+            EndedTime = DateTimeOffset.UtcNow,
+            Status = SyncStatus.Success,
+            TotalUsers = 0,
+            CreatedUsers = 0,
+            UpdatedUsers = 0,
+            DeletedUsers = 0,
+            SkippedUsers = 0
+        };
+        dbContext.IdentitySourceSyncHistories.Add(history);
+
         dbContext.IdentitySourceSyncRecords.Add(new IdentitySourceSyncRecordEntity
         {
             TenantId = tenantId,
-            SyncHistoryId = string.Empty,
+            SyncHistoryId = history.Id,
             ObjectType = "webhook",
             ObjectId = normalizedEvent.ExternalId,
             Action = normalizedEvent.EventType,

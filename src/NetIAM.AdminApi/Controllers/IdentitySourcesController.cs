@@ -180,6 +180,109 @@ public sealed class IdentitySourcesController(
         return Ok(result);
     }
 
+    [HttpGet("{code}/sync-histories")]
+    [RequirePermission("source.read")]
+    public async Task<IActionResult> ListSyncHistories(
+        string code,
+        [FromQuery] int take = 50,
+        CancellationToken cancellationToken = default)
+    {
+        var tenantId = tenantContextAccessor.GetTenantId();
+        var source = await dbContext.IdentitySources
+            .FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Code == code && !x.IsDeleted, cancellationToken);
+        if (source is null)
+        {
+            return NotFound($"Identity source not found: {code}.");
+        }
+
+        var normalizedTake = Math.Clamp(take, 1, 200);
+        var histories = await dbContext.IdentitySourceSyncHistories
+            .Where(x => x.TenantId == tenantId && x.IdentitySourceId == source.Id && !x.IsDeleted)
+            .OrderByDescending(x => x.StartedTime)
+            .Take(normalizedTake)
+            .ToListAsync(cancellationToken);
+
+        return Ok(histories.Select(x => new
+        {
+            x.Id,
+            x.TriggerMode,
+            x.Status,
+            x.TotalUsers,
+            x.CreatedUsers,
+            x.UpdatedUsers,
+            x.DeletedUsers,
+            x.SkippedUsers,
+            x.ErrorMessage,
+            x.StartedTime,
+            x.EndedTime,
+            x.CreateTime,
+            x.UpdateTime
+        }));
+    }
+
+    [HttpGet("{code}/sync-records")]
+    [RequirePermission("source.read")]
+    public async Task<IActionResult> ListSyncRecords(
+        string code,
+        [FromQuery] string? historyId = null,
+        [FromQuery] int take = 100,
+        CancellationToken cancellationToken = default)
+    {
+        var tenantId = tenantContextAccessor.GetTenantId();
+        var source = await dbContext.IdentitySources
+            .FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Code == code && !x.IsDeleted, cancellationToken);
+        if (source is null)
+        {
+            return NotFound($"Identity source not found: {code}.");
+        }
+
+        var normalizedTake = Math.Clamp(take, 1, 500);
+        var sourceHistoryIds = await dbContext.IdentitySourceSyncHistories
+            .Where(x => x.TenantId == tenantId && x.IdentitySourceId == source.Id && !x.IsDeleted)
+            .Select(x => x.Id)
+            .ToListAsync(cancellationToken);
+
+        IQueryable<IdentitySourceSyncRecordEntity> query = dbContext.IdentitySourceSyncRecords
+            .Where(x => x.TenantId == tenantId && !x.IsDeleted);
+
+        if (!string.IsNullOrWhiteSpace(historyId))
+        {
+            if (!sourceHistoryIds.Contains(historyId))
+            {
+                return BadRequest($"History not found for source {code}: {historyId}.");
+            }
+
+            query = query.Where(x => x.SyncHistoryId == historyId);
+        }
+        else
+        {
+            if (sourceHistoryIds.Count == 0)
+            {
+                return Ok(Array.Empty<object>());
+            }
+
+            query = query.Where(x => sourceHistoryIds.Contains(x.SyncHistoryId));
+        }
+
+        var records = await query
+            .OrderByDescending(x => x.CreateTime)
+            .Take(normalizedTake)
+            .ToListAsync(cancellationToken);
+
+        return Ok(records.Select(x => new
+        {
+            x.Id,
+            x.SyncHistoryId,
+            x.ObjectType,
+            x.ObjectId,
+            x.Action,
+            x.Result,
+            x.Detail,
+            x.CreateTime,
+            x.UpdateTime
+        }));
+    }
+
     private static bool TryValidateAndNormalizeSourceConfig(
         IdentitySourceProviderType providerType,
         string? basicConfigJson,

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using NetIAM.Domain.Enums;
 using NetIAM.Infrastructure.Authorization;
+using NetIAM.Infrastructure.Identity;
 using NetIAM.Infrastructure.Persistence;
 using NetIAM.Infrastructure.Services;
 
@@ -13,6 +14,7 @@ namespace NetIAM.AdminApi.Controllers;
 public sealed class RbacController(
     IRbacService rbacService,
     RoleManager<IdentityRole> roleManager,
+    UserManager<NetIamIdentityUser> userManager,
     NetIamDbContext dbContext,
     ITenantContextAccessor tenantContextAccessor,
     IAuditService auditService) : ControllerBase
@@ -189,6 +191,110 @@ public sealed class RbacController(
         return Ok(new { userId, permissions });
     }
 
+    [HttpGet("users/{userId}/roles")]
+    [RequirePermission("rbac.read")]
+    public async Task<IActionResult> GetUserRoles(string userId, CancellationToken cancellationToken)
+    {
+        var tenantId = tenantContextAccessor.GetTenantId();
+        var user = await userManager.Users
+            .FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == userId && !x.IsDeleted, cancellationToken);
+        if (user is null)
+        {
+            return NotFound();
+        }
+
+        var roles = await userManager.GetRolesAsync(user);
+        return Ok(new { userId, roles });
+    }
+
+    [HttpPost("users/{userId}/roles/{roleName}")]
+    [RequirePermission("rbac.write")]
+    public async Task<IActionResult> AssignUserRole(
+        string userId,
+        string roleName,
+        CancellationToken cancellationToken)
+    {
+        var tenantId = tenantContextAccessor.GetTenantId();
+        var user = await userManager.Users
+            .FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == userId && !x.IsDeleted, cancellationToken);
+        if (user is null)
+        {
+            return NotFound("User not found.");
+        }
+
+        if (!await roleManager.RoleExistsAsync(roleName))
+        {
+            return NotFound($"Role not found: {roleName}.");
+        }
+
+        if (!await userManager.IsInRoleAsync(user, roleName))
+        {
+            var assignResult = await userManager.AddToRoleAsync(user, roleName);
+            if (!assignResult.Succeeded)
+            {
+                return BadRequest(assignResult.Errors.Select(x => x.Description));
+            }
+        }
+
+        await auditService.WriteAsync(
+            new AuditWriteRequest(
+                tenantId,
+                "admin.rbac.user-role.assigned",
+                $"User {userId} assigned role {roleName}."),
+            cancellationToken);
+
+        return Ok(new { userId, roleName });
+    }
+
+    [HttpDelete("users/{userId}/roles/{roleName}")]
+    [RequirePermission("rbac.write")]
+    public async Task<IActionResult> RemoveUserRole(
+        string userId,
+        string roleName,
+        CancellationToken cancellationToken)
+    {
+        var tenantId = tenantContextAccessor.GetTenantId();
+        var user = await userManager.Users
+            .FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == userId && !x.IsDeleted, cancellationToken);
+        if (user is null)
+        {
+            return NotFound("User not found.");
+        }
+
+        if (!await roleManager.RoleExistsAsync(roleName))
+        {
+            return NotFound($"Role not found: {roleName}.");
+        }
+
+        var isInRole = await userManager.IsInRoleAsync(user, roleName);
+        if (isInRole && string.Equals(roleName, "Administrator", StringComparison.OrdinalIgnoreCase))
+        {
+            var tenantAdminCount = await CountTenantAdministratorsAsync(tenantId, cancellationToken);
+            if (tenantAdminCount <= 1)
+            {
+                return BadRequest("At least one administrator must remain.");
+            }
+        }
+
+        if (isInRole)
+        {
+            var removeResult = await userManager.RemoveFromRoleAsync(user, roleName);
+            if (!removeResult.Succeeded)
+            {
+                return BadRequest(removeResult.Errors.Select(x => x.Description));
+            }
+        }
+
+        await auditService.WriteAsync(
+            new AuditWriteRequest(
+                tenantId,
+                "admin.rbac.user-role.removed",
+                $"User {userId} removed role {roleName}."),
+            cancellationToken);
+
+        return NoContent();
+    }
+
     [HttpPost("users/{userId}/grants")]
     [RequirePermission("rbac.write")]
     public async Task<IActionResult> GrantUserPermission(
@@ -207,5 +313,118 @@ public sealed class RbacController(
             cancellationToken);
 
         return Ok(new { userId, request.PermissionCode, effect = request.Effect.ToString() });
+    }
+
+    [HttpGet("users/{userId}/grants")]
+    [RequirePermission("rbac.read")]
+    public async Task<IActionResult> ListUserGrants(string userId, CancellationToken cancellationToken)
+    {
+        var tenantId = tenantContextAccessor.GetTenantId();
+        var userExists = await userManager.Users.AnyAsync(
+            x => x.TenantId == tenantId && x.Id == userId && !x.IsDeleted,
+            cancellationToken);
+        if (!userExists)
+        {
+            return NotFound("User not found.");
+        }
+
+        var grants = await dbContext.UserPermissionGrants
+            .Where(x => x.TenantId == tenantId && x.UserId == userId && !x.IsDeleted)
+            .Join(
+                dbContext.Permissions.Where(x => x.TenantId == tenantId && !x.IsDeleted),
+                grant => grant.PermissionId,
+                permission => permission.Id,
+                (grant, permission) => new
+                {
+                    grant.Id,
+                    permission.Code,
+                    grant.Effect,
+                    grant.CreateTime,
+                    grant.UpdateTime
+                })
+            .OrderByDescending(x => x.UpdateTime)
+            .ThenByDescending(x => x.CreateTime)
+            .ToListAsync(cancellationToken);
+
+        return Ok(grants);
+    }
+
+    [HttpDelete("users/{userId}/grants/{permissionCode}")]
+    [RequirePermission("rbac.write")]
+    public async Task<IActionResult> RevokeUserPermissionGrant(
+        string userId,
+        string permissionCode,
+        [FromQuery] PermissionGrantEffect? effect = null,
+        CancellationToken cancellationToken = default)
+    {
+        var tenantId = tenantContextAccessor.GetTenantId();
+        var userExists = await userManager.Users.AnyAsync(
+            x => x.TenantId == tenantId && x.Id == userId && !x.IsDeleted,
+            cancellationToken);
+        if (!userExists)
+        {
+            return NotFound("User not found.");
+        }
+
+        var permission = await dbContext.Permissions
+            .FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Code == permissionCode && !x.IsDeleted, cancellationToken);
+        if (permission is null)
+        {
+            return NotFound($"Permission not found: {permissionCode}.");
+        }
+
+        var query = dbContext.UserPermissionGrants
+            .Where(x => x.TenantId == tenantId
+                        && x.UserId == userId
+                        && x.PermissionId == permission.Id
+                        && !x.IsDeleted);
+        if (effect.HasValue)
+        {
+            query = query.Where(x => x.Effect == effect.Value);
+        }
+
+        var targets = await query.ToListAsync(cancellationToken);
+        if (targets.Count == 0)
+        {
+            return NotFound("No matching permission grant found.");
+        }
+
+        foreach (var target in targets)
+        {
+            target.IsDeleted = true;
+            target.UpdateTime = DateTimeOffset.UtcNow;
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        await auditService.WriteAsync(
+            new AuditWriteRequest(
+                tenantId,
+                "admin.rbac.user-grant.revoked",
+                $"User {userId} grant revoked on {permissionCode}."),
+            cancellationToken);
+
+        return NoContent();
+    }
+
+    private async Task<int> CountTenantAdministratorsAsync(string tenantId, CancellationToken cancellationToken)
+    {
+        var adminRole = await roleManager.FindByNameAsync("Administrator");
+        if (adminRole is null)
+        {
+            return 0;
+        }
+
+        var adminUserIds = await dbContext.Set<IdentityUserRole<string>>()
+            .Where(x => x.RoleId == adminRole.Id)
+            .Select(x => x.UserId)
+            .ToListAsync(cancellationToken);
+        if (adminUserIds.Count == 0)
+        {
+            return 0;
+        }
+
+        return await userManager.Users.CountAsync(
+            x => x.TenantId == tenantId && adminUserIds.Contains(x.Id) && !x.IsDeleted,
+            cancellationToken);
     }
 }

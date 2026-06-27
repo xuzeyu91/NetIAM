@@ -49,6 +49,11 @@
   - system settings APIs (`/api/admin/settings/message|storage|geoip`)
   - monitor session APIs (`/api/admin/monitor/sessions`) with revocation marker support
   - tenant-scoped system setting persistence table `eiam_system_setting`
+- phase4 depth modules delivered:
+  - identity source sync history/record query APIs (`/api/admin/identity-sources/{code}/sync-histories|sync-records`)
+  - admin source tab now visualizes sync histories and record details with history filtering
+  - RBAC user-role binding APIs (`/api/admin/rbac/users/{userId}/roles`) and UI operations
+  - RBAC user grant revoke APIs (`DELETE /api/admin/rbac/users/{userId}/grants/{permissionCode}`) and UI operations
 - admin backend minimal CRUD gaps closed:
   - tenants support update/delete
   - organizations support update/delete with tree-path rebuild and child-delete guard
@@ -65,7 +70,6 @@
 
 - admin modules not yet aligned to eiam console breadth:
   - monitor session force-logout is currently a revocation marker (not yet protocol-level hard logout)
-- identity source sync history/record query APIs and admin UI
 - SAML assertion signing/encryption and metadata certificate rollover automation
 - SCIM PATCH filter semantics and bulk endpoint support
 - provider sandbox contract tests + retry/backoff + rate-limit governance

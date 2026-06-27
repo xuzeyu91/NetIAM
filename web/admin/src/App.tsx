@@ -84,6 +84,32 @@ type IdentitySourceItem = {
   jobConfigJson?: string
 }
 
+type IdentitySourceSyncHistoryItem = {
+  id: string
+  triggerMode: string
+  status: number
+  totalUsers: number
+  createdUsers: number
+  updatedUsers: number
+  deletedUsers: number
+  skippedUsers: number
+  errorMessage?: string
+  startedTime: string
+  endedTime?: string
+}
+
+type IdentitySourceSyncRecordItem = {
+  id: string
+  syncHistoryId: string
+  objectType: string
+  objectId: string
+  action: string
+  result: string
+  detail?: string
+  createTime?: string
+  updateTime?: string
+}
+
 type PermissionItem = {
   id: string
   code: string
@@ -96,6 +122,14 @@ type PermissionItem = {
 type RoleItem = {
   id: string
   name?: string | null
+}
+
+type UserGrantItem = {
+  id: string
+  code: string
+  effect: number
+  createTime?: string
+  updateTime?: string
 }
 
 type SamlServiceProviderItem = {
@@ -476,6 +510,26 @@ function toSubjectTypeLabel(value: number): string {
   }
 
   return 'User'
+}
+
+function toSyncStatusLabel(value: number): string {
+  if (value === 2) {
+    return 'Partial'
+  }
+
+  if (value === 3) {
+    return 'Failed'
+  }
+
+  return 'Success'
+}
+
+function toGrantEffectLabel(value: number): string {
+  if (value === 2) {
+    return 'Deny'
+  }
+
+  return 'Allow'
 }
 
 function isJsonObjectText(text: string): boolean {
@@ -1005,6 +1059,9 @@ function App() {
 
   const [sourceCreate, setSourceCreate] = useState<SourceDraft>(() => createDefaultSourceDraft())
   const [sourceEdit, setSourceEdit] = useState<SourceDraft | null>(null)
+  const [sourceSyncHistories, setSourceSyncHistories] = useState<IdentitySourceSyncHistoryItem[]>([])
+  const [sourceSyncRecords, setSourceSyncRecords] = useState<IdentitySourceSyncRecordItem[]>([])
+  const [selectedSourceHistoryId, setSelectedSourceHistoryId] = useState('')
 
   const [permissionCreate, setPermissionCreate] = useState<PermissionCreateDraft>(() => createDefaultPermissionCreateDraft())
   const [roleCreateName, setRoleCreateName] = useState('')
@@ -1012,6 +1069,11 @@ function App() {
   const [userGrantDraft, setUserGrantDraft] = useState<UserGrantDraft>(() => createDefaultUserGrantDraft())
   const [rbacInspectUserId, setRbacInspectUserId] = useState('')
   const [rbacInspectPermissions, setRbacInspectPermissions] = useState<string[]>([])
+  const [rbacRoleUserId, setRbacRoleUserId] = useState('')
+  const [rbacRoleName, setRbacRoleName] = useState('')
+  const [rbacUserRoles, setRbacUserRoles] = useState<string[]>([])
+  const [rbacGrantUserId, setRbacGrantUserId] = useState('')
+  const [rbacGrantItems, setRbacGrantItems] = useState<UserGrantItem[]>([])
 
   const [samlCreate, setSamlCreate] = useState<SamlDraft>(() => createDefaultSamlDraft())
   const [samlEdit, setSamlEdit] = useState<SamlDraft | null>(null)
@@ -1348,6 +1410,9 @@ function App() {
   useEffect(() => {
     if (!selectedSourceCode) {
       setSourceEdit(null)
+      setSourceSyncHistories([])
+      setSourceSyncRecords([])
+      setSelectedSourceHistoryId('')
       return
     }
 
@@ -1355,6 +1420,9 @@ function App() {
     if (!selected) {
       setSelectedSourceCode(null)
       setSourceEdit(null)
+      setSourceSyncHistories([])
+      setSourceSyncRecords([])
+      setSelectedSourceHistoryId('')
       return
     }
 
@@ -1376,6 +1444,34 @@ function App() {
 
     setSamlEdit(samlDraftFromEntity(selected))
   }, [samlProviders, selectedSamlCode])
+
+  useEffect(() => {
+    if (!selectedSourceCode) {
+      return
+    }
+
+    void (async () => {
+      try {
+        await loadSourceSyncHistories(selectedSourceCode)
+      } catch (requestError) {
+        setError(requestError instanceof Error ? requestError.message : 'Failed to load source sync histories.')
+      }
+    })()
+  }, [requestContext, selectedSourceCode])
+
+  useEffect(() => {
+    if (!selectedSourceCode) {
+      return
+    }
+
+    void (async () => {
+      try {
+        await loadSourceSyncRecords(selectedSourceCode, selectedSourceHistoryId || undefined)
+      } catch (requestError) {
+        setError(requestError instanceof Error ? requestError.message : 'Failed to load source sync records.')
+      }
+    })()
+  }, [requestContext, selectedSourceCode, selectedSourceHistoryId])
 
   useEffect(() => {
     if (!rolePermissionDraft.roleName && selectableRoleNames.length > 0) {
@@ -1400,6 +1496,32 @@ function App() {
       setUserGrantDraft((previous) => ({ ...previous, userId: users[0].id }))
     }
   }, [userGrantDraft.userId, users])
+
+  useEffect(() => {
+    if (!rbacRoleUserId && users.length > 0) {
+      setRbacRoleUserId(users[0].id)
+    }
+  }, [rbacRoleUserId, users])
+
+  useEffect(() => {
+    if (!rbacRoleName && selectableRoleNames.length > 0) {
+      setRbacRoleName(selectableRoleNames[0])
+    }
+  }, [rbacRoleName, selectableRoleNames])
+
+  useEffect(() => {
+    if (!rbacGrantUserId && users.length > 0) {
+      setRbacGrantUserId(users[0].id)
+    }
+  }, [rbacGrantUserId, users])
+
+  useEffect(() => {
+    setRbacUserRoles([])
+  }, [rbacRoleUserId])
+
+  useEffect(() => {
+    setRbacGrantItems([])
+  }, [rbacGrantUserId])
 
   useEffect(() => {
     if (!newAdministratorUserId && users.length > 0) {
@@ -2252,9 +2374,36 @@ function App() {
 
       setSelectedSourceCode(null)
       setSourceEdit(null)
+      setSourceSyncHistories([])
+      setSourceSyncRecords([])
+      setSelectedSourceHistoryId('')
       setSuccess(`Identity source ${sourceEdit.code} deleted.`)
       await refreshAll()
     }, 'Failed to delete identity source.')
+  }
+
+  async function loadSourceSyncHistories(sourceCode: string) {
+    const histories = await requestJson<IdentitySourceSyncHistoryItem[]>(
+      requestContext,
+      `/api/admin/identity-sources/${encodeURIComponent(sourceCode)}/sync-histories?take=50`,
+    )
+    setSourceSyncHistories(histories)
+    setSelectedSourceHistoryId((previous) => {
+      if (previous && histories.some((history) => history.id === previous)) {
+        return previous
+      }
+
+      return histories[0]?.id ?? ''
+    })
+  }
+
+  async function loadSourceSyncRecords(sourceCode: string, historyId?: string) {
+    const historyQuery = historyId ? `&historyId=${encodeURIComponent(historyId)}` : ''
+    const records = await requestJson<IdentitySourceSyncRecordItem[]>(
+      requestContext,
+      `/api/admin/identity-sources/${encodeURIComponent(sourceCode)}/sync-records?take=100${historyQuery}`,
+    )
+    setSourceSyncRecords(records)
   }
 
   async function handleTriggerSync(sourceCode: string) {
@@ -2265,6 +2414,7 @@ function App() {
 
       setSuccess(`Sync triggered for ${sourceCode}.`)
       await refreshAll()
+      await loadSourceSyncHistories(sourceCode)
     }, 'Failed to trigger sync.')
   }
 
@@ -2378,7 +2528,104 @@ function App() {
       )
 
       setSuccess(`Granted ${userGrantDraft.permissionCode} (${userGrantDraft.effect === '1' ? 'Allow' : 'Deny'}).`)
+      if (rbacGrantUserId && rbacGrantUserId === userGrantDraft.userId) {
+        await loadUserGrants(rbacGrantUserId)
+      }
     }, 'Failed to grant user permission.')
+  }
+
+  async function loadUserRoles(userId: string) {
+    const result = await requestJson<{ userId: string; roles: string[] }>(
+      requestContext,
+      `/api/admin/rbac/users/${encodeURIComponent(userId)}/roles`,
+    )
+    setRbacUserRoles(result.roles ?? [])
+  }
+
+  async function handleLoadUserRoles(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!rbacRoleUserId) {
+      setError('Select a user first.')
+      return
+    }
+
+    await runMutation(async () => {
+      await loadUserRoles(rbacRoleUserId)
+      setSuccess(`Loaded roles for user ${rbacRoleUserId}.`)
+    }, 'Failed to load user roles.')
+  }
+
+  async function handleAssignUserRole(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!rbacRoleUserId || !rbacRoleName) {
+      setError('User and role are required.')
+      return
+    }
+
+    await runMutation(async () => {
+      await requestJson<unknown>(
+        requestContext,
+        `/api/admin/rbac/users/${encodeURIComponent(rbacRoleUserId)}/roles/${encodeURIComponent(rbacRoleName)}`,
+        { method: 'POST' },
+      )
+      await loadUserRoles(rbacRoleUserId)
+      setSuccess(`Assigned role ${rbacRoleName} to ${rbacRoleUserId}.`)
+    }, 'Failed to assign user role.')
+  }
+
+  async function handleRemoveUserRole(roleName: string) {
+    if (!rbacRoleUserId || !roleName) {
+      setError('User and role are required.')
+      return
+    }
+
+    await runMutation(async () => {
+      await requestJson<unknown>(
+        requestContext,
+        `/api/admin/rbac/users/${encodeURIComponent(rbacRoleUserId)}/roles/${encodeURIComponent(roleName)}`,
+        { method: 'DELETE' },
+      )
+      await loadUserRoles(rbacRoleUserId)
+      setSuccess(`Removed role ${roleName} from ${rbacRoleUserId}.`)
+    }, 'Failed to remove user role.')
+  }
+
+  async function loadUserGrants(userId: string) {
+    const items = await requestJson<UserGrantItem[]>(
+      requestContext,
+      `/api/admin/rbac/users/${encodeURIComponent(userId)}/grants`,
+    )
+    setRbacGrantItems(items)
+  }
+
+  async function handleLoadUserGrants(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!rbacGrantUserId) {
+      setError('Select a user first.')
+      return
+    }
+
+    await runMutation(async () => {
+      await loadUserGrants(rbacGrantUserId)
+      setSuccess(`Loaded explicit grants for ${rbacGrantUserId}.`)
+    }, 'Failed to load user grants.')
+  }
+
+  async function handleRevokeUserGrant(grant: UserGrantItem) {
+    if (!rbacGrantUserId) {
+      setError('Select a user first.')
+      return
+    }
+
+    await runMutation(async () => {
+      await requestJson<unknown>(
+        requestContext,
+        `/api/admin/rbac/users/${encodeURIComponent(rbacGrantUserId)}/grants/${encodeURIComponent(grant.code)}?effect=${grant.effect}`,
+        { method: 'DELETE' },
+      )
+      await loadUserGrants(rbacGrantUserId)
+      setSuccess(`Revoked ${grant.code} (${toGrantEffectLabel(grant.effect)}) from ${rbacGrantUserId}.`)
+    }, 'Failed to revoke user grant.')
   }
 
   async function handleInspectUserPermissions(event: FormEvent<HTMLFormElement>) {
@@ -4494,6 +4741,91 @@ function App() {
                     </div>
                   </form>
                 )}
+                {sourceEdit && (
+                  <div className="config-form create-section">
+                    <h3>Sync Histories</h3>
+                    <div className="inline-form">
+                      <select
+                        value={selectedSourceHistoryId}
+                        onChange={(event) => setSelectedSourceHistoryId(event.target.value)}
+                      >
+                        <option value="">All histories</option>
+                        {sourceSyncHistories.map((history) => (
+                          <option key={history.id} value={history.id}>
+                            {`${formatDateTime(history.startedTime)} · ${history.triggerMode} · ${toSyncStatusLabel(history.status)}`}
+                          </option>
+                        ))}
+                      </select>
+                      <button type="button" onClick={() => void loadSourceSyncHistories(sourceEdit.code)}>
+                        Refresh Histories
+                      </button>
+                    </div>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Started</th>
+                          <th>Trigger</th>
+                          <th>Status</th>
+                          <th>User Summary</th>
+                          <th>Error</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sourceSyncHistories.length === 0 && (
+                          <tr>
+                            <td colSpan={5} className="empty-cell">
+                              No sync history yet.
+                            </td>
+                          </tr>
+                        )}
+                        {sourceSyncHistories.map((history) => (
+                          <tr
+                            key={history.id}
+                            className={`clickable-row ${selectedSourceHistoryId === history.id ? 'active-row' : ''}`}
+                            onClick={() => setSelectedSourceHistoryId(history.id)}
+                          >
+                            <td>{formatDateTime(history.startedTime)}</td>
+                            <td>{history.triggerMode}</td>
+                            <td>{toSyncStatusLabel(history.status)}</td>
+                            <td>{`${history.createdUsers}/${history.updatedUsers}/${history.totalUsers}`}</td>
+                            <td>{optionOrDash(history.errorMessage)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+
+                    <h3 className="nested-title">Sync Records</h3>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Time</th>
+                          <th>Object</th>
+                          <th>Action</th>
+                          <th>Result</th>
+                          <th>Detail</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sourceSyncRecords.length === 0 && (
+                          <tr>
+                            <td colSpan={5} className="empty-cell">
+                              No sync records found.
+                            </td>
+                          </tr>
+                        )}
+                        {sourceSyncRecords.map((record) => (
+                          <tr key={record.id}>
+                            <td>{formatDateTime(record.createTime)}</td>
+                            <td>{`${record.objectType}:${record.objectId}`}</td>
+                            <td>{record.action}</td>
+                            <td>{record.result}</td>
+                            <td title={record.detail}>{optionOrDash(record.detail?.slice(0, 120))}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </section>
             </div>
           </div>
@@ -4683,15 +5015,119 @@ function App() {
                   </div>
                 </form>
 
+                <form onSubmit={handleLoadUserRoles} className="config-form create-section">
+                  <h3>User Role Bindings</h3>
+                  <div className="inline-form">
+                    <select value={rbacRoleUserId} onChange={(event) => setRbacRoleUserId(event.target.value)}>
+                      <option value="">Select user</option>
+                      {users.map((user) => (
+                        <option key={user.id} value={user.id}>
+                          {`${user.userName} (${user.displayName})`}
+                        </option>
+                      ))}
+                    </select>
+                    <button type="submit">Load Roles</button>
+                  </div>
+                </form>
+
+                <form onSubmit={handleAssignUserRole} className="config-form create-section">
+                  <div className="inline-form">
+                    <select value={rbacRoleName} onChange={(event) => setRbacRoleName(event.target.value)}>
+                      <option value="">Select role</option>
+                      {selectableRoleNames.map((roleName) => (
+                        <option key={roleName} value={roleName}>
+                          {roleName}
+                        </option>
+                      ))}
+                    </select>
+                    <button type="submit">Assign Role</button>
+                  </div>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Assigned Role</th>
+                        <th>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rbacUserRoles.length === 0 && (
+                        <tr>
+                          <td colSpan={2} className="empty-cell">
+                            Load a user to inspect role bindings.
+                          </td>
+                        </tr>
+                      )}
+                      {rbacUserRoles.map((roleName) => (
+                        <tr key={roleName}>
+                          <td>{roleName}</td>
+                          <td>
+                            <button type="button" className="danger-btn" onClick={() => void handleRemoveUserRole(roleName)}>
+                              Remove
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </form>
+
+                <form onSubmit={handleLoadUserGrants} className="config-form create-section">
+                  <h3>Explicit User Grants</h3>
+                  <div className="inline-form">
+                    <select value={rbacGrantUserId} onChange={(event) => setRbacGrantUserId(event.target.value)}>
+                      <option value="">Select user</option>
+                      {users.map((user) => (
+                        <option key={user.id} value={user.id}>
+                          {`${user.userName} (${user.displayName})`}
+                        </option>
+                      ))}
+                    </select>
+                    <button type="submit">Load Grants</button>
+                  </div>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Permission</th>
+                        <th>Effect</th>
+                        <th>Updated</th>
+                        <th>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rbacGrantItems.length === 0 && (
+                        <tr>
+                          <td colSpan={4} className="empty-cell">
+                            Load a user to inspect explicit grants.
+                          </td>
+                        </tr>
+                      )}
+                      {rbacGrantItems.map((grant) => (
+                        <tr key={grant.id}>
+                          <td>{grant.code}</td>
+                          <td>{toGrantEffectLabel(grant.effect)}</td>
+                          <td>{formatDateTime(grant.updateTime ?? grant.createTime)}</td>
+                          <td>
+                            <button type="button" className="danger-btn" onClick={() => void handleRevokeUserGrant(grant)}>
+                              Revoke
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </form>
+
                 <form onSubmit={handleInspectUserPermissions} className="config-form create-section">
                   <h3>Inspect Effective Permissions</h3>
                   <div className="inline-form">
-                    <input
-                      placeholder="User Id"
-                      value={rbacInspectUserId}
-                      onChange={(event) => setRbacInspectUserId(event.target.value)}
-                      required
-                    />
+                    <select value={rbacInspectUserId} onChange={(event) => setRbacInspectUserId(event.target.value)} required>
+                      <option value="">Select user</option>
+                      {users.map((user) => (
+                        <option key={user.id} value={user.id}>
+                          {`${user.userName} (${user.displayName})`}
+                        </option>
+                      ))}
+                    </select>
                     <button type="submit">Load</button>
                   </div>
                   <pre className="json-preview">{JSON.stringify(rbacInspectPermissions, null, 2)}</pre>

@@ -28,28 +28,28 @@
 | System GeoIP Settings | geo source config | full read/write API | full edit UI | aligned in current scope | P1 |
 | Monitor Sessions | list/revoke session | list + revoke-marker API | list + revoke UI | partial (no hard logout) | P2 |
 | RBAC Permissions | list/create | list/create | list/create | partial (missing bulk ops) | P2 |
-| RBAC Roles | list/create/delete + assignment | list/create/delete + assignment | list/create/delete + assignment | partial (missing role-user UX) | P2 |
-| User Permission Grants | query/effective/grant | query/effective/grant | query/effective/grant | partial (missing revoke UX) | P2 |
+| RBAC Roles | list/create/delete + assignment | list/create/delete + role-user binding API | list/create/delete + role-user binding UI | mostly aligned | P1 |
+| User Permission Grants | query/effective/grant/revoke | query/effective/grant/revoke | query/effective/grant/revoke | mostly aligned | P1 |
 | Identity Providers | CRUD | CRUD | CRUD | mostly aligned | P1 |
-| Identity Sources | CRUD + sync/history | CRUD + sync | CRUD + sync | history not exposed | P1 |
+| Identity Sources | CRUD + sync/history | CRUD + sync + history/record query | CRUD + sync + history/record query | mostly aligned | P1 |
 | SAML SP Config | CRUD | upsert/list/delete | upsert/list/delete | mostly aligned | P1 |
 | SCIM Token Management | list/create/revoke | list/create/revoke | list/create/revoke | mostly aligned | P1 |
 | Audit Query | list/filter | list (take) | list | mostly aligned | P1 |
 
-## Quantitative Snapshot (After Third-Phase Closure)
+## Quantitative Snapshot (After Fourth-Phase Depth Closure)
 
 - Admin domain coverage count (this scope): `22` capability lines.
 - Backend available or partial: `22/22` (100%) in this focused scope.
 - Admin UI available (operable): `22/22` (100%) in this focused scope.
 - Remaining gap shifts from "module closure" to "depth semantics and protocol hardening".
 
-## Execution Goal for This Iteration
+## Execution Goal for Next Iteration
 
 1. Keep current admin closure stable and regression-free.
-2. Fill depth gaps:
-   - identity source sync history query and visualization
-   - richer RBAC user-role and grant revoke UX
-   - monitor hard logout and token/session invalidation semantics.
+2. Fill remaining depth gaps:
+   - monitor hard logout and token/session invalidation semantics
+   - RBAC bulk operations and permission policy templates
+   - protocol hardening (SAML cert rollover automation, SCIM patch/bulk semantics).
 
 ## Out of Scope in This Matrix
 
