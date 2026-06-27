@@ -11,7 +11,8 @@ public sealed record ExternalAuthCallback(
     string TenantId,
     string ProviderCode,
     string AuthorizationCode,
-    string State);
+    string State,
+    string? RedirectUri = null);
 
 public sealed record ExternalUserProfile(
     string OpenId,

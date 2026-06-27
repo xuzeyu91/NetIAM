@@ -64,6 +64,7 @@ public sealed class ExternalAuthController(
         string code,
         [FromQuery] string state,
         [FromQuery] string? authCode,
+        [FromQuery(Name = "auth_code")] string? authCodeSnakeCase,
         [FromQuery] string? codeValue,
         [FromQuery(Name = "code")] string? oauthCode,
         CancellationToken cancellationToken = default)
@@ -85,14 +86,15 @@ public sealed class ExternalAuthController(
             return NotFound($"Identity provider not found: {provider}/{code}.");
         }
 
-        var authorizationCode = authCode ?? codeValue ?? oauthCode;
+        var authorizationCode = authCode ?? authCodeSnakeCase ?? codeValue ?? oauthCode;
         if (string.IsNullOrWhiteSpace(authorizationCode))
         {
             return BadRequest("Missing authorization code.");
         }
 
         var handler = providerFactory.Resolve(providerType);
-        var callback = new ExternalAuthCallback(tenantId, code, authorizationCode, state);
+        var callbackUri = $"{Request.Scheme}://{Request.Host}/login/{provider}/{code}";
+        var callback = new ExternalAuthCallback(tenantId, code, authorizationCode, state, callbackUri);
         var token = await handler.ExchangeTokenAsync(providerEntity, callback, cancellationToken);
         var profile = await handler.GetUserProfileAsync(providerEntity, token, cancellationToken);
 
@@ -187,8 +189,13 @@ public sealed class ExternalAuthController(
         return provider.ToLowerInvariant() switch
         {
             "dingtalk" => ExternalProviderType.DingTalk,
+            "dingtalk_oauth" => ExternalProviderType.DingTalk,
             "feishu" => ExternalProviderType.Feishu,
+            "feishu_oauth" => ExternalProviderType.Feishu,
             "wecom" => ExternalProviderType.WeCom,
+            "wechatwork" => ExternalProviderType.WeCom,
+            "wechat_work" => ExternalProviderType.WeCom,
+            "wechatwork_oauth" => ExternalProviderType.WeCom,
             _ => throw new InvalidOperationException($"Unsupported provider type: {provider}.")
         };
     }

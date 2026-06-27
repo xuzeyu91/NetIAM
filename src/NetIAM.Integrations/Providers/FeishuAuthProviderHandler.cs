@@ -20,8 +20,9 @@ public sealed class FeishuAuthProviderHandler(HttpClient httpClient) : IExternal
         CancellationToken cancellationToken = default)
     {
         var config = ProviderConfigParser.ParseIdentityProviderConfig(provider);
-        var clientId = ProviderConfigParser.RequiredString(config, "clientId");
-        var redirectUri = UrlEncoder.Default.Encode($"{request.CallbackBaseUri.TrimEnd('/')}/login/feishu/{provider.Code}");
+        var clientId = ProviderConfigParser.RequiredStringAny(config, "clientId", "appId");
+        var callbackUri = $"{request.CallbackBaseUri.TrimEnd('/')}/login/feishu/{provider.Code}";
+        var redirectUri = UrlEncoder.Default.Encode(callbackUri);
         var state = UrlEncoder.Default.Encode(request.State);
         var authorizeUrl =
             $"https://passport.feishu.cn/suite/passport/oauth/authorize?client_id={clientId}&redirect_uri={redirectUri}&response_type=code&scope=contact:user.base:readonly&state={state}";
@@ -35,22 +36,30 @@ public sealed class FeishuAuthProviderHandler(HttpClient httpClient) : IExternal
         CancellationToken cancellationToken = default)
     {
         var config = ProviderConfigParser.ParseIdentityProviderConfig(provider);
-        var clientId = ProviderConfigParser.RequiredString(config, "clientId");
-        var clientSecret = ProviderConfigParser.RequiredString(config, "clientSecret");
+        var clientId = ProviderConfigParser.RequiredStringAny(config, "clientId", "appId");
+        var clientSecret = ProviderConfigParser.RequiredStringAny(config, "clientSecret", "appSecret");
         var redirectUri = ProviderConfigParser.OptionalString(config, "redirectUri");
+        if (string.IsNullOrWhiteSpace(redirectUri))
+        {
+            redirectUri = callback.RedirectUri;
+        }
 
-        var payload = new Dictionary<string, string?>
+        var payload = new Dictionary<string, string>
         {
             ["client_id"] = clientId,
             ["client_secret"] = clientSecret,
             ["grant_type"] = "authorization_code",
-            ["code"] = callback.AuthorizationCode,
-            ["redirect_uri"] = redirectUri
+            ["code"] = callback.AuthorizationCode
         };
+
+        if (!string.IsNullOrWhiteSpace(redirectUri))
+        {
+            payload["redirect_uri"] = redirectUri;
+        }
 
         using var response = await httpClient.PostAsync(
             "https://passport.feishu.cn/suite/passport/oauth/token",
-            new FormUrlEncodedContent(payload!),
+            new FormUrlEncodedContent(payload),
             cancellationToken);
         response.EnsureSuccessStatusCode();
 

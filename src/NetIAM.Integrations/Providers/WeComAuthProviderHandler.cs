@@ -29,7 +29,7 @@ public sealed class WeComAuthProviderHandler(HttpClient httpClient, IMemoryCache
         var redirectUri = UrlEncoder.Default.Encode($"{request.CallbackBaseUri.TrimEnd('/')}/login/wecom/{provider.Code}");
         var state = UrlEncoder.Default.Encode(request.State);
         var authorizeUrl =
-            $"https://open.work.weixin.qq.com/wwopen/sso/qrConnect?appid={corpId}&agentid={agentId}&redirect_uri={redirectUri}&state={state}";
+            $"https://open.work.weixin.qq.com/wwopen/sso/v1/qrConnect?appid={corpId}&agentid={agentId}&redirect_uri={redirectUri}&state={state}&login_type=jssdk";
 
         return Task.FromResult(authorizeUrl);
     }
@@ -41,7 +41,7 @@ public sealed class WeComAuthProviderHandler(HttpClient httpClient, IMemoryCache
     {
         var config = ProviderConfigParser.ParseIdentityProviderConfig(provider);
         var corpId = ProviderConfigParser.RequiredString(config, "corpId");
-        var appSecret = ProviderConfigParser.RequiredString(config, "appSecret");
+        var appSecret = ProviderConfigParser.RequiredStringAny(config, "appSecret", "corpSecret");
 
         var corpToken = await GetCorpTokenAsync(corpId, appSecret, cancellationToken);
 

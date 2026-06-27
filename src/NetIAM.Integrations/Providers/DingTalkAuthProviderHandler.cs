@@ -20,12 +20,18 @@ public sealed class DingTalkAuthProviderHandler(HttpClient httpClient) : IExtern
         CancellationToken cancellationToken = default)
     {
         var config = ProviderConfigParser.ParseIdentityProviderConfig(provider);
-        var appKey = ProviderConfigParser.RequiredString(config, "appKey");
+        var appKey = ProviderConfigParser.RequiredStringAny(config, "appKey", "appId", "clientId");
+        var corpId = ProviderConfigParser.OptionalString(config, "corpId");
         var redirectUri = UrlEncoder.Default.Encode($"{request.CallbackBaseUri.TrimEnd('/')}/login/dingtalk/{provider.Code}");
         var state = UrlEncoder.Default.Encode(request.State);
+        var scope = UrlEncoder.Default.Encode(string.IsNullOrWhiteSpace(corpId) ? "openid" : "openid corpid");
 
-        var authorizeUrl =
-            $"https://login.dingtalk.com/oauth2/auth?redirect_uri={redirectUri}&response_type=code&client_id={appKey}&scope=openid&state={state}&prompt=consent";
+        var authorizeUrl = $"https://login.dingtalk.com/oauth2/auth?redirect_uri={redirectUri}&response_type=code&client_id={appKey}&scope={scope}&state={state}&prompt=consent";
+        if (!string.IsNullOrWhiteSpace(corpId))
+        {
+            authorizeUrl += $"&corpId={UrlEncoder.Default.Encode(corpId)}";
+        }
+
         return Task.FromResult(authorizeUrl);
     }
 
@@ -35,8 +41,8 @@ public sealed class DingTalkAuthProviderHandler(HttpClient httpClient) : IExtern
         CancellationToken cancellationToken = default)
     {
         var config = ProviderConfigParser.ParseIdentityProviderConfig(provider);
-        var appKey = ProviderConfigParser.RequiredString(config, "appKey");
-        var appSecret = ProviderConfigParser.RequiredString(config, "appSecret");
+        var appKey = ProviderConfigParser.RequiredStringAny(config, "appKey", "appId", "clientId");
+        var appSecret = ProviderConfigParser.RequiredStringAny(config, "appSecret", "clientSecret");
 
         var payload = new
         {

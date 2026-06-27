@@ -25,6 +25,20 @@ internal static class ProviderConfigParser
         return value.GetString()!;
     }
 
+    public static string RequiredStringAny(JsonElement config, params string[] propertyNames)
+    {
+        foreach (var propertyName in propertyNames)
+        {
+            if (config.TryGetProperty(propertyName, out var value) && !string.IsNullOrWhiteSpace(value.GetString()))
+            {
+                return value.GetString()!;
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"Missing required provider config: {string.Join(" or ", propertyNames)}");
+    }
+
     public static string OptionalString(JsonElement config, string propertyName, string fallback = "")
     {
         return config.TryGetProperty(propertyName, out var value) && !string.IsNullOrWhiteSpace(value.GetString())
