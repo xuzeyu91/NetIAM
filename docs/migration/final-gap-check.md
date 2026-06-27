@@ -35,12 +35,28 @@
 
 - `dotnet build src/NetIAM.sln` passes
 - `npm run build` passes for `web/admin` and `web/portal`
+- admin closure milestone delivered:
+  - `web/admin` now covers tenant/user/organization/app/provider/source/rbac/saml/scim/audit tabs
+  - request context supports `X-Tenant-Id` + `X-Acting-User-Id` + optional bearer token
+  - users upgraded from read-only to full CRUD UX
+- admin backend minimal CRUD gaps closed:
+  - tenants support update/delete
+  - organizations support update/delete with tree-path rebuild and child-delete guard
+  - apps support update/delete
+  - rbac roles support create/delete
+- capability baseline document added:
+  - `docs/migration/admin-capability-gap.md`
 - EF migration generated successfully:
   - `src/NetIAM.Infrastructure/Persistence/Migrations/20260627053351_InitialCoreSchema.cs`
   - `src/NetIAM.Infrastructure/Persistence/Migrations/20260627055838_Phase2SamlScimRbac.cs`
 
 ## Remaining Gaps for Next Iteration
 
+- admin modules not yet aligned to eiam console breadth:
+  - user-group management and app-access-policy management
+  - security settings (password policy / defense policy / administrator management)
+  - monitor/session management and system setting modules (message/geoip/storage)
+- identity source sync history/record query APIs and admin UI
 - SAML assertion signing/encryption and metadata certificate rollover automation
 - SCIM PATCH filter semantics and bulk endpoint support
 - provider sandbox contract tests + retry/backoff + rate-limit governance

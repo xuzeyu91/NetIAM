@@ -1,6 +1,32 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
+import type { RequestContext } from './adminClient'
+import { createInitialRequestContext, persistRequestContext, requestJson } from './adminClient'
 import './App.css'
+
+type AdminTab =
+  | 'tenants'
+  | 'users'
+  | 'organizations'
+  | 'apps'
+  | 'providers'
+  | 'sources'
+  | 'rbac'
+  | 'saml'
+  | 'scim'
+  | 'audit'
+
+type ProviderTypeValue = '1' | '2' | '3'
+type PermissionGrantEffectValue = '1' | '2'
+type SamlBindingTypeValue = '1' | '2'
+
+type TenantItem = {
+  id: string
+  identifier: string
+  name: string
+  isActive: boolean
+  defaultDomain?: string
+}
 
 type UserItem = {
   id: string
@@ -9,6 +35,27 @@ type UserItem = {
   email?: string
   phoneNumber?: string
   externalId?: string
+  lockoutEnd?: string
+  accessFailedCount: number
+  createTime?: string
+  updateTime?: string
+}
+
+type OrganizationItem = {
+  id: string
+  name: string
+  code: string
+  parentId?: string
+  path: string
+  displayPath: string
+}
+
+type AppItem = {
+  id: string
+  code: string
+  name: string
+  protocol: string
+  enabled: boolean
 }
 
 type IdentityProviderItem = {
@@ -31,6 +78,46 @@ type IdentitySourceItem = {
   jobConfigJson?: string
 }
 
+type PermissionItem = {
+  id: string
+  code: string
+  name: string
+  resource: string
+  action: string
+  description?: string
+}
+
+type RoleItem = {
+  id: string
+  name?: string | null
+}
+
+type SamlServiceProviderItem = {
+  id: string
+  code: string
+  name: string
+  entityId: string
+  assertionConsumerServiceUrl: string
+  singleLogoutServiceUrl?: string
+  nameIdFormat: string
+  audience?: string
+  relayStateDefault?: string
+  wantSignedAssertions: boolean
+  allowUnsolicitedResponse: boolean
+  bindingType: number
+  enabled: boolean
+  signingCertificatePem?: string
+}
+
+type ScimTokenItem = {
+  id: string
+  name: string
+  isActive: boolean
+  expiresTime?: string
+  lastUsedTime?: string
+  createTime?: string
+}
+
 type AuditItem = {
   id: string
   eventType: string
@@ -39,7 +126,46 @@ type AuditItem = {
   occurredTime: string
 }
 
-type ProviderTypeValue = '1' | '2' | '3'
+type TenantDraft = {
+  identifier: string
+  name: string
+  defaultDomain: string
+  isActive: boolean
+}
+
+type UserCreateDraft = {
+  username: string
+  displayName: string
+  password: string
+  email: string
+  phoneNumber: string
+  externalId: string
+}
+
+type UserEditDraft = {
+  displayName: string
+  email: string
+  phoneNumber: string
+  externalId: string
+}
+
+type OrganizationDraft = {
+  name: string
+  code: string
+  parentId: string
+}
+
+type AppCreateDraft = {
+  code: string
+  name: string
+  protocol: string
+}
+
+type AppEditDraft = {
+  name: string
+  protocol: string
+  enabled: boolean
+}
 
 type ProviderDraft = {
   code: string
@@ -69,40 +195,63 @@ type SourceDraft = {
   jobConfigJson: string
 }
 
-const API_BASE = import.meta.env.VITE_ADMIN_API_BASE ?? 'https://localhost:7002'
-const TENANT_ID = import.meta.env.VITE_TENANT_ID ?? 'tenant-default'
-const PORTAL_BASE = import.meta.env.VITE_PORTAL_API_BASE ?? 'https://localhost:7003'
+type PermissionCreateDraft = {
+  code: string
+  name: string
+  resource: string
+  action: string
+  description: string
+}
+
+type RolePermissionDraft = {
+  roleName: string
+  permissionCode: string
+}
+
+type UserGrantDraft = {
+  userId: string
+  permissionCode: string
+  effect: PermissionGrantEffectValue
+}
+
+type SamlDraft = {
+  code: string
+  name: string
+  entityId: string
+  assertionConsumerServiceUrl: string
+  singleLogoutServiceUrl: string
+  nameIdFormat: string
+  audience: string
+  relayStateDefault: string
+  wantSignedAssertions: boolean
+  allowUnsolicitedResponse: boolean
+  bindingType: SamlBindingTypeValue
+  enabled: boolean
+  signingCertificatePem: string
+}
+
+type ScimTokenDraft = {
+  name: string
+  expiresInDays: string
+}
+
+const tabs: Array<{ id: AdminTab; label: string }> = [
+  { id: 'tenants', label: 'Tenants' },
+  { id: 'users', label: 'Users' },
+  { id: 'organizations', label: 'Organizations' },
+  { id: 'apps', label: 'Apps' },
+  { id: 'providers', label: 'Identity Providers' },
+  { id: 'sources', label: 'Identity Sources' },
+  { id: 'rbac', label: 'RBAC' },
+  { id: 'saml', label: 'SAML SP' },
+  { id: 'scim', label: 'SCIM Tokens' },
+  { id: 'audit', label: 'Audit' },
+]
 
 const providerMap: Record<number, string> = {
   1: 'DingTalk',
   2: 'Feishu',
   3: 'WeCom',
-}
-
-async function requestJson<T>(path: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Tenant-Id': TENANT_ID,
-      ...(options?.headers ?? {}),
-    },
-  })
-
-  const responseText = await response.text()
-  if (!response.ok) {
-    throw new Error(responseText || `Request failed (${response.status})`)
-  }
-
-  if (!responseText.trim()) {
-    return {} as T
-  }
-
-  try {
-    return JSON.parse(responseText) as T
-  } catch {
-    return responseText as T
-  }
 }
 
 function parseJsonObject(rawJson?: string): Record<string, unknown> {
@@ -165,6 +314,141 @@ function toProviderTypeValue(value: number): ProviderTypeValue {
   return '1'
 }
 
+function toSamlBindingTypeValue(value: number): SamlBindingTypeValue {
+  if (value === 2) {
+    return '2'
+  }
+
+  return '1'
+}
+
+function isJsonObjectText(text: string): boolean {
+  try {
+    const parsed = JSON.parse(text)
+    return !!parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+  } catch {
+    return false
+  }
+}
+
+function trimToNull(value: string): string | null {
+  const normalized = value.trim()
+  return normalized ? normalized : null
+}
+
+function formatDateTime(rawValue?: string): string {
+  if (!rawValue) {
+    return '-'
+  }
+
+  const parsed = new Date(rawValue)
+  if (Number.isNaN(parsed.getTime())) {
+    return rawValue
+  }
+
+  return parsed.toLocaleString()
+}
+
+function optionOrDash(value?: string | null): string {
+  if (!value || !value.trim()) {
+    return '-'
+  }
+
+  return value
+}
+
+function normalizeRoleName(role: RoleItem): string {
+  return role.name?.trim() ?? ''
+}
+
+function getProviderPath(providerType: ProviderTypeValue): string {
+  if (providerType === '2') {
+    return 'feishu'
+  }
+
+  if (providerType === '3') {
+    return 'wecom'
+  }
+
+  return 'dingtalk'
+}
+
+function buildProviderCallbackUrl(portalBase: string, providerType: ProviderTypeValue, providerCode: string): string {
+  const normalizedPortalBase = portalBase.endsWith('/') ? portalBase.slice(0, -1) : portalBase
+  const codePart = providerCode.trim() || '{provider-code}'
+  return `${normalizedPortalBase}/login/${getProviderPath(providerType)}/${codePart}`
+}
+
+function createDefaultTenantDraft(): TenantDraft {
+  return {
+    identifier: '',
+    name: '',
+    defaultDomain: '',
+    isActive: true,
+  }
+}
+
+function tenantDraftFromEntity(tenant: TenantItem): TenantDraft {
+  return {
+    identifier: tenant.identifier,
+    name: tenant.name,
+    defaultDomain: tenant.defaultDomain ?? '',
+    isActive: tenant.isActive,
+  }
+}
+
+function createDefaultUserCreateDraft(): UserCreateDraft {
+  return {
+    username: '',
+    displayName: '',
+    password: '',
+    email: '',
+    phoneNumber: '',
+    externalId: '',
+  }
+}
+
+function userEditDraftFromEntity(user: UserItem): UserEditDraft {
+  return {
+    displayName: user.displayName,
+    email: user.email ?? '',
+    phoneNumber: user.phoneNumber ?? '',
+    externalId: user.externalId ?? '',
+  }
+}
+
+function createDefaultOrganizationDraft(): OrganizationDraft {
+  return {
+    name: '',
+    code: '',
+    parentId: '',
+  }
+}
+
+function organizationDraftFromEntity(organization: OrganizationItem): OrganizationDraft {
+  return {
+    name: organization.name,
+    code: organization.code,
+    parentId: organization.parentId ?? '',
+  }
+}
+
+function createDefaultAppCreateDraft(): AppCreateDraft {
+  return {
+    code: '',
+    name: '',
+    protocol: 'oidc',
+  }
+}
+
+function appEditDraftFromEntity(app: AppItem): AppEditDraft {
+  return {
+    name: app.name,
+    protocol: app.protocol,
+    enabled: app.enabled,
+  }
+}
+
 function createDefaultProviderDraft(): ProviderDraft {
   return {
     code: '',
@@ -176,24 +460,6 @@ function createDefaultProviderDraft(): ProviderDraft {
     corpId: '',
     agentId: '',
     appSecret: '',
-  }
-}
-
-function createDefaultSourceDraft(): SourceDraft {
-  return {
-    code: '',
-    name: '',
-    providerType: '1',
-    enabled: true,
-    useMock: false,
-    appKey: '',
-    appId: '',
-    corpId: '',
-    appSecret: '',
-    rootDeptId: '1',
-    rootDeptName: 'Root',
-    strategyConfigJson: '{}',
-    jobConfigJson: '{}',
   }
 }
 
@@ -221,6 +487,39 @@ function buildProviderConfig(draft: ProviderDraft): Record<string, string> {
     corpId: draft.corpId.trim(),
     agentId: draft.agentId.trim(),
     appSecret: draft.appSecret.trim(),
+  }
+}
+
+function providerDraftFromEntity(provider: IdentityProviderItem): ProviderDraft {
+  const config = parseJsonObject(provider.configJson)
+  return {
+    code: provider.code,
+    name: provider.name,
+    providerType: toProviderTypeValue(provider.providerType),
+    enabled: provider.enabled,
+    appKey: readString(config, 'appKey', 'appId', 'clientId'),
+    appId: readString(config, 'appId', 'clientId'),
+    corpId: readString(config, 'corpId'),
+    agentId: readString(config, 'agentId'),
+    appSecret: readString(config, 'appSecret', 'clientSecret', 'corpSecret'),
+  }
+}
+
+function createDefaultSourceDraft(): SourceDraft {
+  return {
+    code: '',
+    name: '',
+    providerType: '1',
+    enabled: true,
+    useMock: false,
+    appKey: '',
+    appId: '',
+    corpId: '',
+    appSecret: '',
+    rootDeptId: '1',
+    rootDeptName: 'Root',
+    strategyConfigJson: '{}',
+    jobConfigJson: '{}',
   }
 }
 
@@ -257,47 +556,6 @@ function buildSourceBasicConfig(draft: SourceDraft): Record<string, unknown> {
   return config
 }
 
-function isJsonObjectText(text: string): boolean {
-  try {
-    const parsed = JSON.parse(text)
-    return !!parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-  } catch {
-    return false
-  }
-}
-
-function getProviderPath(providerType: ProviderTypeValue): string {
-  if (providerType === '2') {
-    return 'feishu'
-  }
-
-  if (providerType === '3') {
-    return 'wecom'
-  }
-
-  return 'dingtalk'
-}
-
-function buildProviderCallbackUrl(providerType: ProviderTypeValue, providerCode: string): string {
-  const codePart = providerCode.trim() || '{provider-code}'
-  return `${PORTAL_BASE}/login/${getProviderPath(providerType)}/${codePart}`
-}
-
-function providerDraftFromEntity(provider: IdentityProviderItem): ProviderDraft {
-  const config = parseJsonObject(provider.configJson)
-  return {
-    code: provider.code,
-    name: provider.name,
-    providerType: toProviderTypeValue(provider.providerType),
-    enabled: provider.enabled,
-    appKey: readString(config, 'appKey', 'appId', 'clientId'),
-    appId: readString(config, 'appId', 'clientId'),
-    corpId: readString(config, 'corpId'),
-    agentId: readString(config, 'agentId'),
-    appSecret: readString(config, 'appSecret', 'clientSecret', 'corpSecret'),
-  }
-}
-
 function sourceDraftFromEntity(source: IdentitySourceItem): SourceDraft {
   const config = parseJsonObject(source.basicConfigJson)
   const rootDeptRaw = config.rootDeptId
@@ -325,37 +583,178 @@ function sourceDraftFromEntity(source: IdentitySourceItem): SourceDraft {
   }
 }
 
+function createDefaultPermissionCreateDraft(): PermissionCreateDraft {
+  return {
+    code: '',
+    name: '',
+    resource: '',
+    action: '',
+    description: '',
+  }
+}
+
+function createDefaultRolePermissionDraft(): RolePermissionDraft {
+  return {
+    roleName: '',
+    permissionCode: '',
+  }
+}
+
+function createDefaultUserGrantDraft(): UserGrantDraft {
+  return {
+    userId: '',
+    permissionCode: '',
+    effect: '1',
+  }
+}
+
+function createDefaultSamlDraft(): SamlDraft {
+  return {
+    code: '',
+    name: '',
+    entityId: '',
+    assertionConsumerServiceUrl: '',
+    singleLogoutServiceUrl: '',
+    nameIdFormat: 'urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified',
+    audience: '',
+    relayStateDefault: '',
+    wantSignedAssertions: true,
+    allowUnsolicitedResponse: false,
+    bindingType: '1',
+    enabled: true,
+    signingCertificatePem: '',
+  }
+}
+
+function samlDraftFromEntity(provider: SamlServiceProviderItem): SamlDraft {
+  return {
+    code: provider.code,
+    name: provider.name,
+    entityId: provider.entityId,
+    assertionConsumerServiceUrl: provider.assertionConsumerServiceUrl,
+    singleLogoutServiceUrl: provider.singleLogoutServiceUrl ?? '',
+    nameIdFormat: provider.nameIdFormat,
+    audience: provider.audience ?? '',
+    relayStateDefault: provider.relayStateDefault ?? '',
+    wantSignedAssertions: provider.wantSignedAssertions,
+    allowUnsolicitedResponse: provider.allowUnsolicitedResponse,
+    bindingType: toSamlBindingTypeValue(provider.bindingType),
+    enabled: provider.enabled,
+    signingCertificatePem: provider.signingCertificatePem ?? '',
+  }
+}
+
+function buildSamlPayload(draft: SamlDraft): Record<string, unknown> {
+  return {
+    code: draft.code.trim(),
+    name: draft.name.trim(),
+    entityId: draft.entityId.trim(),
+    assertionConsumerServiceUrl: draft.assertionConsumerServiceUrl.trim(),
+    singleLogoutServiceUrl: trimToNull(draft.singleLogoutServiceUrl),
+    nameIdFormat: draft.nameIdFormat.trim(),
+    audience: trimToNull(draft.audience),
+    relayStateDefault: trimToNull(draft.relayStateDefault),
+    wantSignedAssertions: draft.wantSignedAssertions,
+    allowUnsolicitedResponse: draft.allowUnsolicitedResponse,
+    bindingType: Number(draft.bindingType),
+    enabled: draft.enabled,
+    signingCertificatePem: trimToNull(draft.signingCertificatePem),
+  }
+}
+
+function createDefaultScimTokenDraft(): ScimTokenDraft {
+  return {
+    name: '',
+    expiresInDays: '365',
+  }
+}
+
 function App() {
+  const [requestContext, setRequestContext] = useState<RequestContext>(() => createInitialRequestContext())
+  const [activeTab, setActiveTab] = useState<AdminTab>('tenants')
   const [loading, setLoading] = useState(false)
-  const [activeTab, setActiveTab] = useState<'users' | 'providers' | 'sources' | 'audit'>('users')
-  const [users, setUsers] = useState<UserItem[]>([])
-  const [providers, setProviders] = useState<IdentityProviderItem[]>([])
-  const [sources, setSources] = useState<IdentitySourceItem[]>([])
-  const [audits, setAudits] = useState<AuditItem[]>([])
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
 
+  const [tenants, setTenants] = useState<TenantItem[]>([])
+  const [users, setUsers] = useState<UserItem[]>([])
+  const [organizations, setOrganizations] = useState<OrganizationItem[]>([])
+  const [apps, setApps] = useState<AppItem[]>([])
+  const [providers, setProviders] = useState<IdentityProviderItem[]>([])
+  const [sources, setSources] = useState<IdentitySourceItem[]>([])
+  const [permissions, setPermissions] = useState<PermissionItem[]>([])
+  const [roles, setRoles] = useState<RoleItem[]>([])
+  const [samlProviders, setSamlProviders] = useState<SamlServiceProviderItem[]>([])
+  const [scimTokens, setScimTokens] = useState<ScimTokenItem[]>([])
+  const [audits, setAudits] = useState<AuditItem[]>([])
+
+  const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null)
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(null)
+  const [selectedOrganizationId, setSelectedOrganizationId] = useState<string | null>(null)
+  const [selectedAppId, setSelectedAppId] = useState<string | null>(null)
+  const [selectedProviderCode, setSelectedProviderCode] = useState<string | null>(null)
+  const [selectedSourceCode, setSelectedSourceCode] = useState<string | null>(null)
+  const [selectedSamlCode, setSelectedSamlCode] = useState<string | null>(null)
+
+  const [tenantCreate, setTenantCreate] = useState<TenantDraft>(() => createDefaultTenantDraft())
+  const [tenantEdit, setTenantEdit] = useState<TenantDraft | null>(null)
+
+  const [userCreate, setUserCreate] = useState<UserCreateDraft>(() => createDefaultUserCreateDraft())
+  const [userEdit, setUserEdit] = useState<UserEditDraft | null>(null)
+
+  const [organizationCreate, setOrganizationCreate] = useState<OrganizationDraft>(() => createDefaultOrganizationDraft())
+  const [organizationEdit, setOrganizationEdit] = useState<OrganizationDraft | null>(null)
+
+  const [appCreate, setAppCreate] = useState<AppCreateDraft>(() => createDefaultAppCreateDraft())
+  const [appEdit, setAppEdit] = useState<AppEditDraft | null>(null)
+
   const [providerCreate, setProviderCreate] = useState<ProviderDraft>(() => createDefaultProviderDraft())
   const [providerEdit, setProviderEdit] = useState<ProviderDraft | null>(null)
-  const [selectedProviderCode, setSelectedProviderCode] = useState<string | null>(null)
 
   const [sourceCreate, setSourceCreate] = useState<SourceDraft>(() => createDefaultSourceDraft())
   const [sourceEdit, setSourceEdit] = useState<SourceDraft | null>(null)
-  const [selectedSourceCode, setSelectedSourceCode] = useState<string | null>(null)
+
+  const [permissionCreate, setPermissionCreate] = useState<PermissionCreateDraft>(() => createDefaultPermissionCreateDraft())
+  const [roleCreateName, setRoleCreateName] = useState('')
+  const [rolePermissionDraft, setRolePermissionDraft] = useState<RolePermissionDraft>(() => createDefaultRolePermissionDraft())
+  const [userGrantDraft, setUserGrantDraft] = useState<UserGrantDraft>(() => createDefaultUserGrantDraft())
+  const [rbacInspectUserId, setRbacInspectUserId] = useState('')
+  const [rbacInspectPermissions, setRbacInspectPermissions] = useState<string[]>([])
+
+  const [samlCreate, setSamlCreate] = useState<SamlDraft>(() => createDefaultSamlDraft())
+  const [samlEdit, setSamlEdit] = useState<SamlDraft | null>(null)
+
+  const [scimCreate, setScimCreate] = useState<ScimTokenDraft>(() => createDefaultScimTokenDraft())
+  const [generatedScimToken, setGeneratedScimToken] = useState('')
 
   const dashboardMetrics = useMemo(
     () => [
+      { label: 'Tenants', value: tenants.length },
       { label: 'Users', value: users.length },
-      { label: 'Identity Providers', value: providers.length },
-      { label: 'Identity Sources', value: sources.length },
-      { label: 'Recent Audits', value: audits.length },
+      { label: 'Organizations', value: organizations.length },
+      { label: 'Apps', value: apps.length },
+      { label: 'Providers', value: providers.length },
+      { label: 'Sources', value: sources.length },
+      { label: 'SAML SP', value: samlProviders.length },
+      { label: 'SCIM Tokens', value: scimTokens.length },
+      { label: 'Audits', value: audits.length },
     ],
-    [audits.length, providers.length, sources.length, users.length],
+    [
+      apps.length,
+      audits.length,
+      organizations.length,
+      providers.length,
+      samlProviders.length,
+      scimTokens.length,
+      sources.length,
+      tenants.length,
+      users.length,
+    ],
   )
 
   const providerCreateCallbackUrl = useMemo(
-    () => buildProviderCallbackUrl(providerCreate.providerType, providerCreate.code),
-    [providerCreate.code, providerCreate.providerType],
+    () => buildProviderCallbackUrl(requestContext.portalBase, providerCreate.providerType, providerCreate.code),
+    [providerCreate.code, providerCreate.providerType, requestContext.portalBase],
   )
 
   const providerEditCallbackUrl = useMemo(() => {
@@ -363,22 +762,83 @@ function App() {
       return ''
     }
 
-    return buildProviderCallbackUrl(providerEdit.providerType, providerEdit.code)
-  }, [providerEdit])
+    return buildProviderCallbackUrl(requestContext.portalBase, providerEdit.providerType, providerEdit.code)
+  }, [providerEdit, requestContext.portalBase])
+
+  const selectableRoleNames = useMemo(
+    () =>
+      roles
+        .map((role) => normalizeRoleName(role))
+        .filter((roleName, index, values) => roleName && values.indexOf(roleName) === index),
+    [roles],
+  )
+
+  const selectablePermissionCodes = useMemo(
+    () =>
+      permissions
+        .map((permission) => permission.code)
+        .filter((code, index, values) => code && values.indexOf(code) === index),
+    [permissions],
+  )
+
+  useEffect(() => {
+    persistRequestContext(requestContext)
+  }, [requestContext])
+
+  async function runMutation(execute: () => Promise<void>, fallbackErrorMessage: string) {
+    setLoading(true)
+    setError('')
+    setSuccess('')
+
+    try {
+      await execute()
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : fallbackErrorMessage)
+    } finally {
+      setLoading(false)
+    }
+  }
 
   async function refreshAll() {
     setLoading(true)
     setError('')
     try {
-      const [userData, providerData, sourceData, auditData] = await Promise.all([
-        requestJson<UserItem[]>('/api/admin/users'),
-        requestJson<IdentityProviderItem[]>('/api/admin/identity-providers'),
-        requestJson<IdentitySourceItem[]>('/api/admin/identity-sources'),
-        requestJson<AuditItem[]>('/api/admin/audit?take=50'),
+      const [
+        tenantData,
+        userData,
+        organizationData,
+        appData,
+        providerData,
+        sourceData,
+        permissionData,
+        roleData,
+        samlData,
+        scimData,
+        auditData,
+      ] = await Promise.all([
+        requestJson<TenantItem[]>(requestContext, '/api/admin/tenants'),
+        requestJson<UserItem[]>(requestContext, '/api/admin/users'),
+        requestJson<OrganizationItem[]>(requestContext, '/api/admin/organizations'),
+        requestJson<AppItem[]>(requestContext, '/api/admin/apps'),
+        requestJson<IdentityProviderItem[]>(requestContext, '/api/admin/identity-providers'),
+        requestJson<IdentitySourceItem[]>(requestContext, '/api/admin/identity-sources'),
+        requestJson<PermissionItem[]>(requestContext, '/api/admin/rbac/permissions'),
+        requestJson<RoleItem[]>(requestContext, '/api/admin/rbac/roles'),
+        requestJson<SamlServiceProviderItem[]>(requestContext, '/api/admin/saml/service-providers'),
+        requestJson<ScimTokenItem[]>(requestContext, '/api/admin/scim/tokens'),
+        requestJson<AuditItem[]>(requestContext, '/api/admin/audit?take=100'),
       ])
+
+      setTenants(tenantData)
       setUsers(userData)
+      setOrganizations(organizationData)
+      setApps(appData)
       setProviders(providerData)
       setSources(sourceData)
+      setPermissions(permissionData)
+      setRoles(roleData)
+      setSamlProviders(samlData)
+      setScimTokens(scimData)
       setAudits(auditData)
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Failed to load admin data.')
@@ -392,7 +852,72 @@ function App() {
   }, [])
 
   useEffect(() => {
+    if (!selectedTenantId) {
+      setTenantEdit(null)
+      return
+    }
+
+    const selected = tenants.find((tenant) => tenant.id === selectedTenantId)
+    if (!selected) {
+      setSelectedTenantId(null)
+      setTenantEdit(null)
+      return
+    }
+
+    setTenantEdit(tenantDraftFromEntity(selected))
+  }, [selectedTenantId, tenants])
+
+  useEffect(() => {
+    if (!selectedUserId) {
+      setUserEdit(null)
+      return
+    }
+
+    const selected = users.find((user) => user.id === selectedUserId)
+    if (!selected) {
+      setSelectedUserId(null)
+      setUserEdit(null)
+      return
+    }
+
+    setUserEdit(userEditDraftFromEntity(selected))
+  }, [selectedUserId, users])
+
+  useEffect(() => {
+    if (!selectedOrganizationId) {
+      setOrganizationEdit(null)
+      return
+    }
+
+    const selected = organizations.find((organization) => organization.id === selectedOrganizationId)
+    if (!selected) {
+      setSelectedOrganizationId(null)
+      setOrganizationEdit(null)
+      return
+    }
+
+    setOrganizationEdit(organizationDraftFromEntity(selected))
+  }, [organizations, selectedOrganizationId])
+
+  useEffect(() => {
+    if (!selectedAppId) {
+      setAppEdit(null)
+      return
+    }
+
+    const selected = apps.find((app) => app.id === selectedAppId)
+    if (!selected) {
+      setSelectedAppId(null)
+      setAppEdit(null)
+      return
+    }
+
+    setAppEdit(appEditDraftFromEntity(selected))
+  }, [apps, selectedAppId])
+
+  useEffect(() => {
     if (!selectedProviderCode) {
+      setProviderEdit(null)
       return
     }
 
@@ -408,6 +933,7 @@ function App() {
 
   useEffect(() => {
     if (!selectedSourceCode) {
+      setSourceEdit(null)
       return
     }
 
@@ -419,7 +945,89 @@ function App() {
     }
 
     setSourceEdit(sourceDraftFromEntity(selected))
-  }, [sources, selectedSourceCode])
+  }, [selectedSourceCode, sources])
+
+  useEffect(() => {
+    if (!selectedSamlCode) {
+      setSamlEdit(null)
+      return
+    }
+
+    const selected = samlProviders.find((provider) => provider.code === selectedSamlCode)
+    if (!selected) {
+      setSelectedSamlCode(null)
+      setSamlEdit(null)
+      return
+    }
+
+    setSamlEdit(samlDraftFromEntity(selected))
+  }, [samlProviders, selectedSamlCode])
+
+  useEffect(() => {
+    if (!rolePermissionDraft.roleName && selectableRoleNames.length > 0) {
+      setRolePermissionDraft((previous) => ({ ...previous, roleName: selectableRoleNames[0] }))
+    }
+  }, [rolePermissionDraft.roleName, selectableRoleNames])
+
+  useEffect(() => {
+    if (!rolePermissionDraft.permissionCode && selectablePermissionCodes.length > 0) {
+      setRolePermissionDraft((previous) => ({ ...previous, permissionCode: selectablePermissionCodes[0] }))
+    }
+  }, [rolePermissionDraft.permissionCode, selectablePermissionCodes])
+
+  useEffect(() => {
+    if (!userGrantDraft.permissionCode && selectablePermissionCodes.length > 0) {
+      setUserGrantDraft((previous) => ({ ...previous, permissionCode: selectablePermissionCodes[0] }))
+    }
+  }, [selectablePermissionCodes, userGrantDraft.permissionCode])
+
+  useEffect(() => {
+    if (!userGrantDraft.userId && users.length > 0) {
+      setUserGrantDraft((previous) => ({ ...previous, userId: users[0].id }))
+    }
+  }, [userGrantDraft.userId, users])
+
+  function updateRequestContextField<K extends keyof RequestContext>(key: K, value: RequestContext[K]) {
+    setRequestContext((previous) => ({ ...previous, [key]: value }))
+  }
+
+  function clearMessages() {
+    setError('')
+    setSuccess('')
+    setGeneratedScimToken('')
+  }
+
+  function updateTenantCreate<K extends keyof TenantDraft>(key: K, value: TenantDraft[K]) {
+    setTenantCreate((previous) => ({ ...previous, [key]: value }))
+  }
+
+  function updateTenantEdit<K extends keyof TenantDraft>(key: K, value: TenantDraft[K]) {
+    setTenantEdit((previous) => (previous ? { ...previous, [key]: value } : previous))
+  }
+
+  function updateUserCreate<K extends keyof UserCreateDraft>(key: K, value: UserCreateDraft[K]) {
+    setUserCreate((previous) => ({ ...previous, [key]: value }))
+  }
+
+  function updateUserEdit<K extends keyof UserEditDraft>(key: K, value: UserEditDraft[K]) {
+    setUserEdit((previous) => (previous ? { ...previous, [key]: value } : previous))
+  }
+
+  function updateOrganizationCreate<K extends keyof OrganizationDraft>(key: K, value: OrganizationDraft[K]) {
+    setOrganizationCreate((previous) => ({ ...previous, [key]: value }))
+  }
+
+  function updateOrganizationEdit<K extends keyof OrganizationDraft>(key: K, value: OrganizationDraft[K]) {
+    setOrganizationEdit((previous) => (previous ? { ...previous, [key]: value } : previous))
+  }
+
+  function updateAppCreate<K extends keyof AppCreateDraft>(key: K, value: AppCreateDraft[K]) {
+    setAppCreate((previous) => ({ ...previous, [key]: value }))
+  }
+
+  function updateAppEdit<K extends keyof AppEditDraft>(key: K, value: AppEditDraft[K]) {
+    setAppEdit((previous) => (previous ? { ...previous, [key]: value } : previous))
+  }
 
   function updateProviderCreate<K extends keyof ProviderDraft>(key: K, value: ProviderDraft[K]) {
     setProviderCreate((previous) => ({ ...previous, [key]: value }))
@@ -437,51 +1045,293 @@ function App() {
     setSourceEdit((previous) => (previous ? { ...previous, [key]: value } : previous))
   }
 
-  function selectProvider(provider: IdentityProviderItem) {
-    setSelectedProviderCode(provider.code)
-    setProviderEdit(providerDraftFromEntity(provider))
+  function updatePermissionCreate<K extends keyof PermissionCreateDraft>(key: K, value: PermissionCreateDraft[K]) {
+    setPermissionCreate((previous) => ({ ...previous, [key]: value }))
   }
 
-  function selectSource(source: IdentitySourceItem) {
-    setSelectedSourceCode(source.code)
-    setSourceEdit(sourceDraftFromEntity(source))
+  function updateRolePermission<K extends keyof RolePermissionDraft>(key: K, value: RolePermissionDraft[K]) {
+    setRolePermissionDraft((previous) => ({ ...previous, [key]: value }))
   }
 
-  function resetProviderEdit() {
-    if (!selectedProviderCode) {
-      return
-    }
-
-    const selected = providers.find((provider) => provider.code === selectedProviderCode)
-    if (!selected) {
-      return
-    }
-
-    setProviderEdit(providerDraftFromEntity(selected))
+  function updateUserGrant<K extends keyof UserGrantDraft>(key: K, value: UserGrantDraft[K]) {
+    setUserGrantDraft((previous) => ({ ...previous, [key]: value }))
   }
 
-  function resetSourceEdit() {
-    if (!selectedSourceCode) {
+  function updateSamlCreate<K extends keyof SamlDraft>(key: K, value: SamlDraft[K]) {
+    setSamlCreate((previous) => ({ ...previous, [key]: value }))
+  }
+
+  function updateSamlEdit<K extends keyof SamlDraft>(key: K, value: SamlDraft[K]) {
+    setSamlEdit((previous) => (previous ? { ...previous, [key]: value } : previous))
+  }
+
+  function updateScimCreate<K extends keyof ScimTokenDraft>(key: K, value: ScimTokenDraft[K]) {
+    setScimCreate((previous) => ({ ...previous, [key]: value }))
+  }
+
+  async function handleCreateTenant(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    await runMutation(async () => {
+      const createdTenant = await requestJson<TenantItem>(requestContext, '/api/admin/tenants', {
+        method: 'POST',
+        body: JSON.stringify({
+          identifier: tenantCreate.identifier.trim(),
+          name: tenantCreate.name.trim(),
+          defaultDomain: trimToNull(tenantCreate.defaultDomain),
+        }),
+      })
+
+      setTenantCreate(createDefaultTenantDraft())
+      setSelectedTenantId(createdTenant.id)
+      setSuccess(`Tenant ${createdTenant.identifier} created.`)
+      await refreshAll()
+    }, 'Failed to create tenant.')
+  }
+
+  async function handleSaveTenant(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!tenantEdit || !selectedTenantId) {
       return
     }
 
-    const selected = sources.find((source) => source.code === selectedSourceCode)
-    if (!selected) {
+    await runMutation(async () => {
+      await requestJson<TenantItem>(requestContext, `/api/admin/tenants/${encodeURIComponent(selectedTenantId)}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          identifier: tenantEdit.identifier.trim(),
+          name: tenantEdit.name.trim(),
+          defaultDomain: trimToNull(tenantEdit.defaultDomain),
+          isActive: tenantEdit.isActive,
+        }),
+      })
+
+      setSuccess(`Tenant ${tenantEdit.identifier} updated.`)
+      await refreshAll()
+    }, 'Failed to update tenant.')
+  }
+
+  async function handleDeleteTenant() {
+    if (!tenantEdit || !selectedTenantId) {
       return
     }
 
-    setSourceEdit(sourceDraftFromEntity(selected))
+    if (!window.confirm(`Delete tenant ${tenantEdit.identifier}?`)) {
+      return
+    }
+
+    await runMutation(async () => {
+      await requestJson<unknown>(requestContext, `/api/admin/tenants/${encodeURIComponent(selectedTenantId)}`, {
+        method: 'DELETE',
+      })
+
+      setSelectedTenantId(null)
+      setTenantEdit(null)
+      setSuccess(`Tenant ${tenantEdit.identifier} deleted.`)
+      await refreshAll()
+    }, 'Failed to delete tenant.')
+  }
+
+  async function handleCreateUser(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    await runMutation(async () => {
+      const created = await requestJson<{ id: string; userName: string }>(requestContext, '/api/admin/users', {
+        method: 'POST',
+        body: JSON.stringify({
+          username: userCreate.username.trim(),
+          displayName: userCreate.displayName.trim(),
+          password: userCreate.password,
+          email: trimToNull(userCreate.email),
+          phoneNumber: trimToNull(userCreate.phoneNumber),
+          externalId: trimToNull(userCreate.externalId),
+        }),
+      })
+
+      setUserCreate(createDefaultUserCreateDraft())
+      setSelectedUserId(created.id)
+      setSuccess(`User ${created.userName} created.`)
+      await refreshAll()
+    }, 'Failed to create user.')
+  }
+
+  async function handleSaveUser(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!userEdit || !selectedUserId) {
+      return
+    }
+
+    await runMutation(async () => {
+      await requestJson<{ id: string; userName: string }>(requestContext, `/api/admin/users/${encodeURIComponent(selectedUserId)}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          displayName: userEdit.displayName.trim(),
+          email: trimToNull(userEdit.email),
+          phoneNumber: trimToNull(userEdit.phoneNumber),
+          externalId: trimToNull(userEdit.externalId),
+        }),
+      })
+
+      setSuccess('User updated.')
+      await refreshAll()
+    }, 'Failed to update user.')
+  }
+
+  async function handleDeleteUser() {
+    if (!userEdit || !selectedUserId) {
+      return
+    }
+
+    if (!window.confirm('Delete selected user?')) {
+      return
+    }
+
+    await runMutation(async () => {
+      await requestJson<unknown>(requestContext, `/api/admin/users/${encodeURIComponent(selectedUserId)}`, {
+        method: 'DELETE',
+      })
+
+      setSelectedUserId(null)
+      setUserEdit(null)
+      setSuccess('User deleted.')
+      await refreshAll()
+    }, 'Failed to delete user.')
+  }
+
+  async function handleCreateOrganization(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    await runMutation(async () => {
+      const created = await requestJson<OrganizationItem>(requestContext, '/api/admin/organizations', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: organizationCreate.name.trim(),
+          code: organizationCreate.code.trim(),
+          parentId: trimToNull(organizationCreate.parentId),
+        }),
+      })
+
+      setOrganizationCreate(createDefaultOrganizationDraft())
+      setSelectedOrganizationId(created.id)
+      setSuccess(`Organization ${created.name} created.`)
+      await refreshAll()
+    }, 'Failed to create organization.')
+  }
+
+  async function handleSaveOrganization(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!organizationEdit || !selectedOrganizationId) {
+      return
+    }
+
+    await runMutation(async () => {
+      await requestJson<OrganizationItem>(
+        requestContext,
+        `/api/admin/organizations/${encodeURIComponent(selectedOrganizationId)}`,
+        {
+          method: 'PUT',
+          body: JSON.stringify({
+            name: organizationEdit.name.trim(),
+            code: organizationEdit.code.trim(),
+            parentId: trimToNull(organizationEdit.parentId),
+          }),
+        },
+      )
+
+      setSuccess(`Organization ${organizationEdit.name} updated.`)
+      await refreshAll()
+    }, 'Failed to update organization.')
+  }
+
+  async function handleDeleteOrganization() {
+    if (!organizationEdit || !selectedOrganizationId) {
+      return
+    }
+
+    if (!window.confirm(`Delete organization ${organizationEdit.name}?`)) {
+      return
+    }
+
+    await runMutation(async () => {
+      await requestJson<unknown>(requestContext, `/api/admin/organizations/${encodeURIComponent(selectedOrganizationId)}`, {
+        method: 'DELETE',
+      })
+
+      setSelectedOrganizationId(null)
+      setOrganizationEdit(null)
+      setSuccess(`Organization ${organizationEdit.name} deleted.`)
+      await refreshAll()
+    }, 'Failed to delete organization.')
+  }
+
+  async function handleCreateApp(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    await runMutation(async () => {
+      const created = await requestJson<AppItem>(requestContext, '/api/admin/apps', {
+        method: 'POST',
+        body: JSON.stringify({
+          code: appCreate.code.trim(),
+          name: appCreate.name.trim(),
+          protocol: appCreate.protocol.trim(),
+        }),
+      })
+
+      setAppCreate(createDefaultAppCreateDraft())
+      setSelectedAppId(created.id)
+      setSuccess(`App ${created.code} created.`)
+      await refreshAll()
+    }, 'Failed to create app.')
+  }
+
+  async function handleSaveApp(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!appEdit || !selectedAppId) {
+      return
+    }
+
+    await runMutation(async () => {
+      await requestJson<AppItem>(requestContext, `/api/admin/apps/${encodeURIComponent(selectedAppId)}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          name: appEdit.name.trim(),
+          protocol: appEdit.protocol.trim(),
+          enabled: appEdit.enabled,
+        }),
+      })
+
+      setSuccess('App updated.')
+      await refreshAll()
+    }, 'Failed to update app.')
+  }
+
+  async function handleDeleteApp() {
+    if (!selectedAppId) {
+      return
+    }
+
+    if (!window.confirm('Delete selected app?')) {
+      return
+    }
+
+    await runMutation(async () => {
+      await requestJson<unknown>(requestContext, `/api/admin/apps/${encodeURIComponent(selectedAppId)}`, {
+        method: 'DELETE',
+      })
+
+      setSelectedAppId(null)
+      setAppEdit(null)
+      setSuccess('App deleted.')
+      await refreshAll()
+    }, 'Failed to delete app.')
   }
 
   async function handleCreateProvider(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    setLoading(true)
-    setError('')
-    setSuccess('')
 
     const code = providerCreate.code.trim()
-    try {
-      await requestJson('/api/admin/identity-providers', {
+    await runMutation(async () => {
+      await requestJson<IdentityProviderItem>(requestContext, '/api/admin/identity-providers', {
         method: 'POST',
         body: JSON.stringify({
           code,
@@ -491,15 +1341,12 @@ function App() {
           configJson: JSON.stringify(buildProviderConfig(providerCreate)),
         }),
       })
+
       setProviderCreate(createDefaultProviderDraft())
-      setSuccess('Identity Provider created.')
-      await refreshAll()
       setSelectedProviderCode(code)
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'Failed to create provider.')
-    } finally {
-      setLoading(false)
-    }
+      setSuccess(`Identity provider ${code} created.`)
+      await refreshAll()
+    }, 'Failed to create identity provider.')
   }
 
   async function handleSaveProvider(event: FormEvent<HTMLFormElement>) {
@@ -508,26 +1355,24 @@ function App() {
       return
     }
 
-    setLoading(true)
-    setError('')
-    setSuccess('')
-    try {
-      await requestJson(`/api/admin/identity-providers/${encodeURIComponent(providerEdit.code)}`, {
-        method: 'PUT',
-        body: JSON.stringify({
-          name: providerEdit.name.trim(),
-          providerType: Number(providerEdit.providerType),
-          enabled: providerEdit.enabled,
-          configJson: JSON.stringify(buildProviderConfig(providerEdit)),
-        }),
-      })
-      setSuccess(`Identity Provider ${providerEdit.code} updated.`)
+    await runMutation(async () => {
+      await requestJson<IdentityProviderItem>(
+        requestContext,
+        `/api/admin/identity-providers/${encodeURIComponent(providerEdit.code)}`,
+        {
+          method: 'PUT',
+          body: JSON.stringify({
+            name: providerEdit.name.trim(),
+            providerType: Number(providerEdit.providerType),
+            enabled: providerEdit.enabled,
+            configJson: JSON.stringify(buildProviderConfig(providerEdit)),
+          }),
+        },
+      )
+
+      setSuccess(`Identity provider ${providerEdit.code} updated.`)
       await refreshAll()
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'Failed to update provider.')
-    } finally {
-      setLoading(false)
-    }
+    }, 'Failed to update identity provider.')
   }
 
   async function handleDeleteProvider() {
@@ -539,33 +1384,29 @@ function App() {
       return
     }
 
-    setLoading(true)
-    setError('')
-    setSuccess('')
-    try {
-      await requestJson(`/api/admin/identity-providers/${encodeURIComponent(providerEdit.code)}`, {
+    await runMutation(async () => {
+      await requestJson<unknown>(requestContext, `/api/admin/identity-providers/${encodeURIComponent(providerEdit.code)}`, {
         method: 'DELETE',
       })
+
       setSelectedProviderCode(null)
       setProviderEdit(null)
-      setSuccess(`Identity Provider ${providerEdit.code} deleted.`)
+      setSuccess(`Identity provider ${providerEdit.code} deleted.`)
       await refreshAll()
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'Failed to delete provider.')
-    } finally {
-      setLoading(false)
-    }
+    }, 'Failed to delete identity provider.')
   }
 
   async function handleCreateSource(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    setLoading(true)
-    setError('')
-    setSuccess('')
-
     const code = sourceCreate.code.trim()
-    try {
-      await requestJson('/api/admin/identity-sources', {
+
+    if (!isJsonObjectText(sourceCreate.strategyConfigJson) || !isJsonObjectText(sourceCreate.jobConfigJson)) {
+      setError('Strategy Config and Job Config must be valid JSON objects.')
+      return
+    }
+
+    await runMutation(async () => {
+      await requestJson<IdentitySourceItem>(requestContext, '/api/admin/identity-sources', {
         method: 'POST',
         body: JSON.stringify({
           code,
@@ -577,15 +1418,12 @@ function App() {
           jobConfigJson: sourceCreate.jobConfigJson,
         }),
       })
+
       setSourceCreate(createDefaultSourceDraft())
-      setSuccess('Identity Source created.')
-      await refreshAll()
       setSelectedSourceCode(code)
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'Failed to create source.')
-    } finally {
-      setLoading(false)
-    }
+      setSuccess(`Identity source ${code} created.`)
+      await refreshAll()
+    }, 'Failed to create identity source.')
   }
 
   async function handleSaveSource(event: FormEvent<HTMLFormElement>) {
@@ -594,38 +1432,31 @@ function App() {
       return
     }
 
-    if (!isJsonObjectText(sourceEdit.strategyConfigJson)) {
-      setError('Strategy Config must be a valid JSON object.')
+    if (!isJsonObjectText(sourceEdit.strategyConfigJson) || !isJsonObjectText(sourceEdit.jobConfigJson)) {
+      setError('Strategy Config and Job Config must be valid JSON objects.')
       return
     }
 
-    if (!isJsonObjectText(sourceEdit.jobConfigJson)) {
-      setError('Job Config must be a valid JSON object.')
-      return
-    }
+    await runMutation(async () => {
+      await requestJson<IdentitySourceItem>(
+        requestContext,
+        `/api/admin/identity-sources/${encodeURIComponent(sourceEdit.code)}`,
+        {
+          method: 'PUT',
+          body: JSON.stringify({
+            name: sourceEdit.name.trim(),
+            providerType: Number(sourceEdit.providerType),
+            enabled: sourceEdit.enabled,
+            basicConfigJson: JSON.stringify(buildSourceBasicConfig(sourceEdit)),
+            strategyConfigJson: sourceEdit.strategyConfigJson,
+            jobConfigJson: sourceEdit.jobConfigJson,
+          }),
+        },
+      )
 
-    setLoading(true)
-    setError('')
-    setSuccess('')
-    try {
-      await requestJson(`/api/admin/identity-sources/${encodeURIComponent(sourceEdit.code)}`, {
-        method: 'PUT',
-        body: JSON.stringify({
-          name: sourceEdit.name.trim(),
-          providerType: Number(sourceEdit.providerType),
-          enabled: sourceEdit.enabled,
-          basicConfigJson: JSON.stringify(buildSourceBasicConfig(sourceEdit)),
-          strategyConfigJson: sourceEdit.strategyConfigJson,
-          jobConfigJson: sourceEdit.jobConfigJson,
-        }),
-      })
-      setSuccess(`Identity Source ${sourceEdit.code} updated.`)
+      setSuccess(`Identity source ${sourceEdit.code} updated.`)
       await refreshAll()
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'Failed to update source.')
-    } finally {
-      setLoading(false)
-    }
+    }, 'Failed to update identity source.')
   }
 
   async function handleDeleteSource() {
@@ -637,60 +1468,323 @@ function App() {
       return
     }
 
-    setLoading(true)
-    setError('')
-    setSuccess('')
-    try {
-      await requestJson(`/api/admin/identity-sources/${encodeURIComponent(sourceEdit.code)}`, {
+    await runMutation(async () => {
+      await requestJson<unknown>(requestContext, `/api/admin/identity-sources/${encodeURIComponent(sourceEdit.code)}`, {
         method: 'DELETE',
       })
+
       setSelectedSourceCode(null)
       setSourceEdit(null)
-      setSuccess(`Identity Source ${sourceEdit.code} deleted.`)
+      setSuccess(`Identity source ${sourceEdit.code} deleted.`)
       await refreshAll()
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'Failed to delete source.')
-    } finally {
-      setLoading(false)
-    }
+    }, 'Failed to delete identity source.')
   }
 
   async function handleTriggerSync(sourceCode: string) {
-    setLoading(true)
-    setError('')
-    setSuccess('')
-    try {
-      await requestJson(`/api/admin/identity-sources/${encodeURIComponent(sourceCode)}/sync`, { method: 'POST' })
+    await runMutation(async () => {
+      await requestJson<unknown>(requestContext, `/api/admin/identity-sources/${encodeURIComponent(sourceCode)}/sync`, {
+        method: 'POST',
+      })
+
       setSuccess(`Sync triggered for ${sourceCode}.`)
       await refreshAll()
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'Failed to trigger sync.')
-    } finally {
-      setLoading(false)
+    }, 'Failed to trigger sync.')
+  }
+
+  async function handleCreatePermission(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    await runMutation(async () => {
+      const created = await requestJson<PermissionItem>(requestContext, '/api/admin/rbac/permissions', {
+        method: 'POST',
+        body: JSON.stringify({
+          code: permissionCreate.code.trim(),
+          name: permissionCreate.name.trim(),
+          resource: permissionCreate.resource.trim(),
+          action: permissionCreate.action.trim(),
+          description: trimToNull(permissionCreate.description),
+        }),
+      })
+
+      setPermissionCreate(createDefaultPermissionCreateDraft())
+      setSuccess(`Permission ${created.code} created.`)
+      await refreshAll()
+    }, 'Failed to create permission.')
+  }
+
+  async function handleCreateRole(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    await runMutation(async () => {
+      const roleName = roleCreateName.trim()
+      await requestJson<{ id?: string; name?: string }>(requestContext, '/api/admin/rbac/roles', {
+        method: 'POST',
+        body: JSON.stringify({ name: roleName }),
+      })
+
+      setRoleCreateName('')
+      setSuccess(`Role ${roleName} created.`)
+      await refreshAll()
+    }, 'Failed to create role.')
+  }
+
+  async function handleDeleteRole(roleName: string) {
+    if (!window.confirm(`Delete role ${roleName}?`)) {
+      return
     }
+
+    await runMutation(async () => {
+      await requestJson<unknown>(requestContext, `/api/admin/rbac/roles/${encodeURIComponent(roleName)}`, {
+        method: 'DELETE',
+      })
+
+      setSuccess(`Role ${roleName} deleted.`)
+      await refreshAll()
+    }, 'Failed to delete role.')
+  }
+
+  async function handleAssignRolePermission(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!rolePermissionDraft.roleName || !rolePermissionDraft.permissionCode) {
+      setError('Role and permission are required.')
+      return
+    }
+
+    await runMutation(async () => {
+      await requestJson<{ roleName: string; permissionCode: string }>(
+        requestContext,
+        `/api/admin/rbac/roles/${encodeURIComponent(rolePermissionDraft.roleName)}/permissions/${encodeURIComponent(rolePermissionDraft.permissionCode)}`,
+        { method: 'POST' },
+      )
+
+      setSuccess(`Assigned ${rolePermissionDraft.permissionCode} to ${rolePermissionDraft.roleName}.`)
+      await refreshAll()
+    }, 'Failed to assign role permission.')
+  }
+
+  async function handleRemoveRolePermission() {
+    if (!rolePermissionDraft.roleName || !rolePermissionDraft.permissionCode) {
+      setError('Role and permission are required.')
+      return
+    }
+
+    await runMutation(async () => {
+      await requestJson<unknown>(
+        requestContext,
+        `/api/admin/rbac/roles/${encodeURIComponent(rolePermissionDraft.roleName)}/permissions/${encodeURIComponent(rolePermissionDraft.permissionCode)}`,
+        { method: 'DELETE' },
+      )
+
+      setSuccess(`Removed ${rolePermissionDraft.permissionCode} from ${rolePermissionDraft.roleName}.`)
+      await refreshAll()
+    }, 'Failed to remove role permission.')
+  }
+
+  async function handleGrantUserPermission(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!userGrantDraft.userId || !userGrantDraft.permissionCode) {
+      setError('User and permission are required.')
+      return
+    }
+
+    await runMutation(async () => {
+      await requestJson<unknown>(
+        requestContext,
+        `/api/admin/rbac/users/${encodeURIComponent(userGrantDraft.userId)}/grants`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            permissionCode: userGrantDraft.permissionCode,
+            effect: Number(userGrantDraft.effect),
+          }),
+        },
+      )
+
+      setSuccess(`Granted ${userGrantDraft.permissionCode} (${userGrantDraft.effect === '1' ? 'Allow' : 'Deny'}).`)
+    }, 'Failed to grant user permission.')
+  }
+
+  async function handleInspectUserPermissions(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!rbacInspectUserId.trim()) {
+      setError('User ID is required.')
+      return
+    }
+
+    await runMutation(async () => {
+      const result = await requestJson<{ userId: string; permissions: string[] }>(
+        requestContext,
+        `/api/admin/rbac/users/${encodeURIComponent(rbacInspectUserId.trim())}/permissions`,
+      )
+      setRbacInspectPermissions(result.permissions ?? [])
+      setSuccess(`Loaded effective permissions for ${result.userId}.`)
+    }, 'Failed to load user permissions.')
+  }
+
+  async function handleCreateSamlProvider(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    await runMutation(async () => {
+      const payload = buildSamlPayload(samlCreate)
+      const created = await requestJson<SamlServiceProviderItem>(requestContext, '/api/admin/saml/service-providers', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      })
+
+      setSamlCreate(createDefaultSamlDraft())
+      setSelectedSamlCode(created.code)
+      setSuccess(`SAML service provider ${created.code} upserted.`)
+      await refreshAll()
+    }, 'Failed to create SAML service provider.')
+  }
+
+  async function handleSaveSamlProvider(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!samlEdit) {
+      return
+    }
+
+    await runMutation(async () => {
+      await requestJson<SamlServiceProviderItem>(requestContext, '/api/admin/saml/service-providers', {
+        method: 'POST',
+        body: JSON.stringify(buildSamlPayload(samlEdit)),
+      })
+
+      setSuccess(`SAML service provider ${samlEdit.code} updated.`)
+      await refreshAll()
+    }, 'Failed to update SAML service provider.')
+  }
+
+  async function handleDeleteSamlProvider() {
+    if (!samlEdit) {
+      return
+    }
+
+    if (!window.confirm(`Delete SAML service provider ${samlEdit.code}?`)) {
+      return
+    }
+
+    await runMutation(async () => {
+      await requestJson<unknown>(requestContext, `/api/admin/saml/service-providers/${encodeURIComponent(samlEdit.code)}`, {
+        method: 'DELETE',
+      })
+
+      setSelectedSamlCode(null)
+      setSamlEdit(null)
+      setSuccess(`SAML service provider ${samlEdit.code} deleted.`)
+      await refreshAll()
+    }, 'Failed to delete SAML service provider.')
+  }
+
+  async function handleCreateScimToken(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    await runMutation(async () => {
+      const response = await requestJson<{ id: string; name: string; expiresTime?: string; token: string }>(
+        requestContext,
+        '/api/admin/scim/tokens',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            name: scimCreate.name.trim(),
+            expiresInDays: Number(scimCreate.expiresInDays),
+          }),
+        },
+      )
+
+      setScimCreate(createDefaultScimTokenDraft())
+      setGeneratedScimToken(response.token)
+      setSuccess(`SCIM token ${response.name} created. Copy the token now; it will not be shown again.`)
+      await refreshAll()
+    }, 'Failed to create SCIM token.')
+  }
+
+  async function handleRevokeScimToken(token: ScimTokenItem) {
+    if (!window.confirm(`Revoke SCIM token ${token.name}?`)) {
+      return
+    }
+
+    await runMutation(async () => {
+      await requestJson<unknown>(requestContext, `/api/admin/scim/tokens/${encodeURIComponent(token.id)}`, {
+        method: 'DELETE',
+      })
+
+      setSuccess(`SCIM token ${token.name} revoked.`)
+      await refreshAll()
+    }, 'Failed to revoke SCIM token.')
   }
 
   return (
     <main className="layout">
       <aside className="sidebar">
         <h1>NetIAM Admin</h1>
-        <p className="muted">Tenant: {TENANT_ID}</p>
-        <button onClick={() => setActiveTab('users')} className={activeTab === 'users' ? 'active' : ''}>
-          Users
-        </button>
-        <button onClick={() => setActiveTab('providers')} className={activeTab === 'providers' ? 'active' : ''}>
-          Identity Providers
-        </button>
-        <button onClick={() => setActiveTab('sources')} className={activeTab === 'sources' ? 'active' : ''}>
-          Identity Sources
-        </button>
-        <button onClick={() => setActiveTab('audit')} className={activeTab === 'audit' ? 'active' : ''}>
-          Audit
-        </button>
-        <button onClick={() => void refreshAll()}>Refresh</button>
+        <p className="muted">Tenant header: {requestContext.tenantId || '-'}</p>
+        {tabs.map((tab) => (
+          <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={activeTab === tab.id ? 'active' : ''}>
+            {tab.label}
+          </button>
+        ))}
+        <button onClick={() => void refreshAll()}>Refresh Data</button>
       </aside>
 
       <section className="content">
+        <section className="context-panel">
+          <h2>Request Context</h2>
+          <p className="section-hint">
+            Every request sends <code>X-Tenant-Id</code>, optional <code>X-Acting-User-Id</code>, and optional{' '}
+            <code>Authorization: Bearer</code> token.
+          </p>
+          <div className="field-grid">
+            <label className="field-block">
+              <span>Admin API Base</span>
+              <input
+                value={requestContext.apiBase}
+                onChange={(event) => updateRequestContextField('apiBase', event.target.value)}
+                placeholder="https://localhost:7002"
+              />
+            </label>
+            <label className="field-block">
+              <span>Portal Base (callback preview)</span>
+              <input
+                value={requestContext.portalBase}
+                onChange={(event) => updateRequestContextField('portalBase', event.target.value)}
+                placeholder="https://localhost:7003"
+              />
+            </label>
+            <label className="field-block">
+              <span>Tenant Id</span>
+              <input
+                value={requestContext.tenantId}
+                onChange={(event) => updateRequestContextField('tenantId', event.target.value)}
+                placeholder="tenant-default"
+              />
+            </label>
+            <label className="field-block">
+              <span>Acting User Id</span>
+              <input
+                value={requestContext.actingUserId}
+                onChange={(event) => updateRequestContextField('actingUserId', event.target.value)}
+                placeholder="user-admin-default"
+              />
+            </label>
+            <label className="field-block span-2">
+              <span>Bearer Token (optional)</span>
+              <input
+                type="password"
+                value={requestContext.bearerToken}
+                onChange={(event) => updateRequestContextField('bearerToken', event.target.value)}
+                placeholder="Paste access token (with or without Bearer prefix)"
+              />
+            </label>
+          </div>
+          <div className="action-row">
+            <button onClick={() => void refreshAll()}>Apply Context & Refresh</button>
+            <button className="secondary-btn" onClick={clearMessages}>
+              Clear Messages
+            </button>
+          </div>
+        </section>
+
         <header className="metrics">
           {dashboardMetrics.map((metric) => (
             <div key={metric.label} className="card">
@@ -703,37 +1797,528 @@ function App() {
         {loading && <div className="banner info">Loading...</div>}
         {error && <div className="banner error">{error}</div>}
         {success && <div className="banner success">{success}</div>}
+        {generatedScimToken && (
+          <div className="banner info">
+            One-time SCIM token value: <code>{generatedScimToken}</code>
+          </div>
+        )}
+
+        {activeTab === 'tenants' && (
+          <div className="panel">
+            <h2>Tenants</h2>
+            <p className="section-hint">Manage tenant lifecycle (create, update, soft delete).</p>
+
+            <form onSubmit={handleCreateTenant} className="config-form create-section">
+              <h3>Create Tenant</h3>
+              <div className="inline-form">
+                <input
+                  placeholder="Identifier"
+                  value={tenantCreate.identifier}
+                  onChange={(event) => updateTenantCreate('identifier', event.target.value)}
+                  required
+                />
+                <input
+                  placeholder="Name"
+                  value={tenantCreate.name}
+                  onChange={(event) => updateTenantCreate('name', event.target.value)}
+                  required
+                />
+                <input
+                  placeholder="Default Domain (optional)"
+                  value={tenantCreate.defaultDomain}
+                  onChange={(event) => updateTenantCreate('defaultDomain', event.target.value)}
+                />
+                <button type="submit">Create</button>
+              </div>
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={tenantCreate.isActive}
+                  onChange={(event) => updateTenantCreate('isActive', event.target.checked)}
+                />
+                Active
+              </label>
+            </form>
+
+            <div className="detail-layout">
+              <section className="list-panel">
+                <h3>Tenant List</h3>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Identifier</th>
+                      <th>Name</th>
+                      <th>Active</th>
+                      <th>Default Domain</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {tenants.length === 0 && (
+                      <tr>
+                        <td colSpan={4} className="empty-cell">
+                          No tenants found.
+                        </td>
+                      </tr>
+                    )}
+                    {tenants.map((tenant) => (
+                      <tr
+                        key={tenant.id}
+                        className={`clickable-row ${selectedTenantId === tenant.id ? 'active-row' : ''}`}
+                        onClick={() => setSelectedTenantId(tenant.id)}
+                      >
+                        <td>{tenant.identifier}</td>
+                        <td>{tenant.name}</td>
+                        <td>{tenant.isActive ? 'Yes' : 'No'}</td>
+                        <td>{optionOrDash(tenant.defaultDomain)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </section>
+              <section className="detail-panel">
+                <h3>Tenant Detail</h3>
+                {!tenantEdit && <p className="empty-hint">Select a tenant to edit.</p>}
+                {tenantEdit && (
+                  <form onSubmit={handleSaveTenant} className="config-form">
+                    <div className="inline-form">
+                      <input
+                        placeholder="Identifier"
+                        value={tenantEdit.identifier}
+                        onChange={(event) => updateTenantEdit('identifier', event.target.value)}
+                        required
+                      />
+                      <input
+                        placeholder="Name"
+                        value={tenantEdit.name}
+                        onChange={(event) => updateTenantEdit('name', event.target.value)}
+                        required
+                      />
+                    </div>
+                    <input
+                      className="long-input"
+                      placeholder="Default Domain"
+                      value={tenantEdit.defaultDomain}
+                      onChange={(event) => updateTenantEdit('defaultDomain', event.target.value)}
+                    />
+                    <label className="checkbox-row">
+                      <input
+                        type="checkbox"
+                        checked={tenantEdit.isActive}
+                        onChange={(event) => updateTenantEdit('isActive', event.target.checked)}
+                      />
+                      Active
+                    </label>
+                    <div className="action-row">
+                      <button type="submit">Save Changes</button>
+                      <button
+                        type="button"
+                        className="secondary-btn"
+                        onClick={() => {
+                          const target = tenants.find((tenant) => tenant.id === selectedTenantId)
+                          if (target) {
+                            setTenantEdit(tenantDraftFromEntity(target))
+                          }
+                        }}
+                      >
+                        Reset
+                      </button>
+                      <button type="button" className="danger-btn" onClick={() => void handleDeleteTenant()}>
+                        Delete
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </section>
+            </div>
+          </div>
+        )}
 
         {activeTab === 'users' && (
           <div className="panel">
             <h2>Users</h2>
-            <table>
-              <thead>
-                <tr>
-                  <th>Username</th>
-                  <th>Display Name</th>
-                  <th>Email</th>
-                  <th>External Id</th>
-                </tr>
-              </thead>
-              <tbody>
-                {users.map((user) => (
-                  <tr key={user.id}>
-                    <td>{user.userName}</td>
-                    <td>{user.displayName}</td>
-                    <td>{user.email ?? '-'}</td>
-                    <td>{user.externalId ?? '-'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <p className="section-hint">Full CRUD for tenant users.</p>
+
+            <form onSubmit={handleCreateUser} className="config-form create-section">
+              <h3>Create User</h3>
+              <div className="inline-form">
+                <input
+                  placeholder="Username"
+                  value={userCreate.username}
+                  onChange={(event) => updateUserCreate('username', event.target.value)}
+                  required
+                />
+                <input
+                  placeholder="Display Name"
+                  value={userCreate.displayName}
+                  onChange={(event) => updateUserCreate('displayName', event.target.value)}
+                  required
+                />
+                <input
+                  type="password"
+                  placeholder="Password"
+                  value={userCreate.password}
+                  onChange={(event) => updateUserCreate('password', event.target.value)}
+                  required
+                />
+              </div>
+              <div className="inline-form">
+                <input
+                  placeholder="Email (optional)"
+                  value={userCreate.email}
+                  onChange={(event) => updateUserCreate('email', event.target.value)}
+                />
+                <input
+                  placeholder="Phone Number (optional)"
+                  value={userCreate.phoneNumber}
+                  onChange={(event) => updateUserCreate('phoneNumber', event.target.value)}
+                />
+                <input
+                  placeholder="External Id (optional)"
+                  value={userCreate.externalId}
+                  onChange={(event) => updateUserCreate('externalId', event.target.value)}
+                />
+                <button type="submit">Create</button>
+              </div>
+            </form>
+
+            <div className="detail-layout">
+              <section className="list-panel">
+                <h3>User List</h3>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Username</th>
+                      <th>Display Name</th>
+                      <th>Email</th>
+                      <th>Failed</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {users.length === 0 && (
+                      <tr>
+                        <td colSpan={4} className="empty-cell">
+                          No users found.
+                        </td>
+                      </tr>
+                    )}
+                    {users.map((user) => (
+                      <tr
+                        key={user.id}
+                        className={`clickable-row ${selectedUserId === user.id ? 'active-row' : ''}`}
+                        onClick={() => setSelectedUserId(user.id)}
+                      >
+                        <td>{user.userName}</td>
+                        <td>{user.displayName}</td>
+                        <td>{optionOrDash(user.email)}</td>
+                        <td>{user.accessFailedCount}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </section>
+              <section className="detail-panel">
+                <h3>User Detail</h3>
+                {!userEdit && <p className="empty-hint">Select a user to edit.</p>}
+                {userEdit && (
+                  <form onSubmit={handleSaveUser} className="config-form">
+                    <input
+                      className="long-input"
+                      placeholder="Display Name"
+                      value={userEdit.displayName}
+                      onChange={(event) => updateUserEdit('displayName', event.target.value)}
+                      required
+                    />
+                    <div className="inline-form">
+                      <input
+                        placeholder="Email"
+                        value={userEdit.email}
+                        onChange={(event) => updateUserEdit('email', event.target.value)}
+                      />
+                      <input
+                        placeholder="Phone Number"
+                        value={userEdit.phoneNumber}
+                        onChange={(event) => updateUserEdit('phoneNumber', event.target.value)}
+                      />
+                      <input
+                        placeholder="External Id"
+                        value={userEdit.externalId}
+                        onChange={(event) => updateUserEdit('externalId', event.target.value)}
+                      />
+                    </div>
+                    <p className="config-note">
+                      Lockout End: <code>{formatDateTime(users.find((user) => user.id === selectedUserId)?.lockoutEnd)}</code>
+                    </p>
+                    <div className="action-row">
+                      <button type="submit">Save Changes</button>
+                      <button
+                        type="button"
+                        className="secondary-btn"
+                        onClick={() => {
+                          const target = users.find((user) => user.id === selectedUserId)
+                          if (target) {
+                            setUserEdit(userEditDraftFromEntity(target))
+                          }
+                        }}
+                      >
+                        Reset
+                      </button>
+                      <button type="button" className="danger-btn" onClick={() => void handleDeleteUser()}>
+                        Delete
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </section>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'organizations' && (
+          <div className="panel">
+            <h2>Organizations</h2>
+            <p className="section-hint">Manage organization tree nodes (create, update, delete).</p>
+
+            <form onSubmit={handleCreateOrganization} className="config-form create-section">
+              <h3>Create Organization</h3>
+              <div className="inline-form">
+                <input
+                  placeholder="Code"
+                  value={organizationCreate.code}
+                  onChange={(event) => updateOrganizationCreate('code', event.target.value)}
+                  required
+                />
+                <input
+                  placeholder="Name"
+                  value={organizationCreate.name}
+                  onChange={(event) => updateOrganizationCreate('name', event.target.value)}
+                  required
+                />
+                <select
+                  value={organizationCreate.parentId}
+                  onChange={(event) => updateOrganizationCreate('parentId', event.target.value)}
+                >
+                  <option value="">Root</option>
+                  {organizations.map((organization) => (
+                    <option key={organization.id} value={organization.id}>
+                      {organization.displayPath}
+                    </option>
+                  ))}
+                </select>
+                <button type="submit">Create</button>
+              </div>
+            </form>
+
+            <div className="detail-layout">
+              <section className="list-panel">
+                <h3>Organization List</h3>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Code</th>
+                      <th>Name</th>
+                      <th>Display Path</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {organizations.length === 0 && (
+                      <tr>
+                        <td colSpan={3} className="empty-cell">
+                          No organizations found.
+                        </td>
+                      </tr>
+                    )}
+                    {organizations.map((organization) => (
+                      <tr
+                        key={organization.id}
+                        className={`clickable-row ${selectedOrganizationId === organization.id ? 'active-row' : ''}`}
+                        onClick={() => setSelectedOrganizationId(organization.id)}
+                      >
+                        <td>{organization.code}</td>
+                        <td>{organization.name}</td>
+                        <td>{organization.displayPath}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </section>
+              <section className="detail-panel">
+                <h3>Organization Detail</h3>
+                {!organizationEdit && <p className="empty-hint">Select an organization to edit.</p>}
+                {organizationEdit && (
+                  <form onSubmit={handleSaveOrganization} className="config-form">
+                    <div className="inline-form">
+                      <input
+                        placeholder="Code"
+                        value={organizationEdit.code}
+                        onChange={(event) => updateOrganizationEdit('code', event.target.value)}
+                        required
+                      />
+                      <input
+                        placeholder="Name"
+                        value={organizationEdit.name}
+                        onChange={(event) => updateOrganizationEdit('name', event.target.value)}
+                        required
+                      />
+                    </div>
+                    <select
+                      value={organizationEdit.parentId}
+                      onChange={(event) => updateOrganizationEdit('parentId', event.target.value)}
+                    >
+                      <option value="">Root</option>
+                      {organizations
+                        .filter((organization) => organization.id !== selectedOrganizationId)
+                        .map((organization) => (
+                          <option key={organization.id} value={organization.id}>
+                            {organization.displayPath}
+                          </option>
+                        ))}
+                    </select>
+                    <div className="action-row">
+                      <button type="submit">Save Changes</button>
+                      <button
+                        type="button"
+                        className="secondary-btn"
+                        onClick={() => {
+                          const target = organizations.find((organization) => organization.id === selectedOrganizationId)
+                          if (target) {
+                            setOrganizationEdit(organizationDraftFromEntity(target))
+                          }
+                        }}
+                      >
+                        Reset
+                      </button>
+                      <button type="button" className="danger-btn" onClick={() => void handleDeleteOrganization()}>
+                        Delete
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </section>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'apps' && (
+          <div className="panel">
+            <h2>Apps</h2>
+            <p className="section-hint">Manage application metadata for protocol integration.</p>
+
+            <form onSubmit={handleCreateApp} className="config-form create-section">
+              <h3>Create App</h3>
+              <div className="inline-form">
+                <input
+                  placeholder="Code"
+                  value={appCreate.code}
+                  onChange={(event) => updateAppCreate('code', event.target.value)}
+                  required
+                />
+                <input
+                  placeholder="Name"
+                  value={appCreate.name}
+                  onChange={(event) => updateAppCreate('name', event.target.value)}
+                  required
+                />
+                <input
+                  placeholder="Protocol (oidc/jwt/form)"
+                  value={appCreate.protocol}
+                  onChange={(event) => updateAppCreate('protocol', event.target.value)}
+                  required
+                />
+                <button type="submit">Create</button>
+              </div>
+            </form>
+
+            <div className="detail-layout">
+              <section className="list-panel">
+                <h3>App List</h3>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Code</th>
+                      <th>Name</th>
+                      <th>Protocol</th>
+                      <th>Enabled</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {apps.length === 0 && (
+                      <tr>
+                        <td colSpan={4} className="empty-cell">
+                          No applications found.
+                        </td>
+                      </tr>
+                    )}
+                    {apps.map((app) => (
+                      <tr
+                        key={app.id}
+                        className={`clickable-row ${selectedAppId === app.id ? 'active-row' : ''}`}
+                        onClick={() => setSelectedAppId(app.id)}
+                      >
+                        <td>{app.code}</td>
+                        <td>{app.name}</td>
+                        <td>{app.protocol}</td>
+                        <td>{app.enabled ? 'Yes' : 'No'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </section>
+              <section className="detail-panel">
+                <h3>App Detail</h3>
+                {!appEdit && <p className="empty-hint">Select an app to edit.</p>}
+                {appEdit && (
+                  <form onSubmit={handleSaveApp} className="config-form">
+                    <div className="inline-form">
+                      <input
+                        placeholder="Name"
+                        value={appEdit.name}
+                        onChange={(event) => updateAppEdit('name', event.target.value)}
+                        required
+                      />
+                      <input
+                        placeholder="Protocol"
+                        value={appEdit.protocol}
+                        onChange={(event) => updateAppEdit('protocol', event.target.value)}
+                        required
+                      />
+                    </div>
+                    <label className="checkbox-row">
+                      <input
+                        type="checkbox"
+                        checked={appEdit.enabled}
+                        onChange={(event) => updateAppEdit('enabled', event.target.checked)}
+                      />
+                      Enabled
+                    </label>
+                    <div className="action-row">
+                      <button type="submit">Save Changes</button>
+                      <button
+                        type="button"
+                        className="secondary-btn"
+                        onClick={() => {
+                          const target = apps.find((app) => app.id === selectedAppId)
+                          if (target) {
+                            setAppEdit(appEditDraftFromEntity(target))
+                          }
+                        }}
+                      >
+                        Reset
+                      </button>
+                      <button type="button" className="danger-btn" onClick={() => void handleDeleteApp()}>
+                        Delete
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </section>
+            </div>
           </div>
         )}
 
         {activeTab === 'providers' && (
           <div className="panel">
             <h2>Identity Providers</h2>
-            <p className="section-hint">Create in the top form, then use the detail editor for updates and deletion.</p>
+            <p className="section-hint">Create in top form, then edit and delete from the detail panel.</p>
 
             <form onSubmit={handleCreateProvider} className="config-form create-section">
               <h3>Create Provider</h3>
@@ -760,7 +2345,6 @@ function App() {
                 </select>
                 <button type="submit">Create</button>
               </div>
-
               <label className="checkbox-row">
                 <input
                   type="checkbox"
@@ -864,7 +2448,7 @@ function App() {
                       <tr
                         key={provider.id}
                         className={`clickable-row ${selectedProviderCode === provider.code ? 'active-row' : ''}`}
-                        onClick={() => selectProvider(provider)}
+                        onClick={() => setSelectedProviderCode(provider.code)}
                       >
                         <td>{provider.code}</td>
                         <td>{provider.name}</td>
@@ -982,7 +2566,16 @@ function App() {
 
                     <div className="action-row">
                       <button type="submit">Save Changes</button>
-                      <button type="button" className="secondary-btn" onClick={resetProviderEdit}>
+                      <button
+                        type="button"
+                        className="secondary-btn"
+                        onClick={() => {
+                          const target = providers.find((provider) => provider.code === selectedProviderCode)
+                          if (target) {
+                            setProviderEdit(providerDraftFromEntity(target))
+                          }
+                        }}
+                      >
                         Reset
                       </button>
                       <button type="button" className="danger-btn" onClick={() => void handleDeleteProvider()}>
@@ -999,7 +2592,7 @@ function App() {
         {activeTab === 'sources' && (
           <div className="panel">
             <h2>Identity Sources</h2>
-            <p className="section-hint">Use detail editor for full maintenance (enabled, sync policy JSON, deletion).</p>
+            <p className="section-hint">Manage sync source config and trigger manual sync jobs.</p>
 
             <form onSubmit={handleCreateSource} className="config-form create-section">
               <h3>Create Source</h3>
@@ -1061,12 +2654,12 @@ function App() {
                     required
                   />
                   <input
-                    placeholder="Root Dept Id (default 1)"
+                    placeholder="Root Dept Id"
                     value={sourceCreate.rootDeptId}
                     onChange={(event) => updateSourceCreate('rootDeptId', event.target.value)}
                   />
                   <input
-                    placeholder="Root Dept Name (optional)"
+                    placeholder="Root Dept Name"
                     value={sourceCreate.rootDeptName}
                     onChange={(event) => updateSourceCreate('rootDeptName', event.target.value)}
                   />
@@ -1108,6 +2701,28 @@ function App() {
                   />
                 </div>
               )}
+
+              <label className="field-label" htmlFor="create-strategy-config">
+                Strategy Config (JSON object)
+              </label>
+              <textarea
+                id="create-strategy-config"
+                className="json-editor"
+                rows={3}
+                value={sourceCreate.strategyConfigJson}
+                onChange={(event) => updateSourceCreate('strategyConfigJson', event.target.value)}
+              />
+
+              <label className="field-label" htmlFor="create-job-config">
+                Job Config (JSON object)
+              </label>
+              <textarea
+                id="create-job-config"
+                className="json-editor"
+                rows={3}
+                value={sourceCreate.jobConfigJson}
+                onChange={(event) => updateSourceCreate('jobConfigJson', event.target.value)}
+              />
             </form>
 
             <div className="detail-layout">
@@ -1134,7 +2749,7 @@ function App() {
                       <tr
                         key={source.id}
                         className={`clickable-row ${selectedSourceCode === source.code ? 'active-row' : ''}`}
-                        onClick={() => selectSource(source)}
+                        onClick={() => setSelectedSourceCode(source.code)}
                       >
                         <td>{source.code}</td>
                         <td>{source.name}</td>
@@ -1148,8 +2763,7 @@ function App() {
 
               <section className="detail-panel">
                 <h3>Source Detail</h3>
-                {!sourceEdit && <p className="empty-hint">Select a source from the list to edit details.</p>}
-
+                {!sourceEdit && <p className="empty-hint">Select a source to edit.</p>}
                 {sourceEdit && (
                   <form onSubmit={handleSaveSource} className="config-form">
                     <div className="inline-form">
@@ -1185,7 +2799,7 @@ function App() {
                         checked={sourceEdit.useMock}
                         onChange={(event) => updateSourceEdit('useMock', event.target.checked)}
                       />
-                      Use mock data (skip real API credential validation)
+                      Use mock data
                     </label>
 
                     {!sourceEdit.useMock && sourceEdit.providerType === '1' && (
@@ -1204,12 +2818,12 @@ function App() {
                           required
                         />
                         <input
-                          placeholder="Root Dept Id (default 1)"
+                          placeholder="Root Dept Id"
                           value={sourceEdit.rootDeptId}
                           onChange={(event) => updateSourceEdit('rootDeptId', event.target.value)}
                         />
                         <input
-                          placeholder="Root Dept Name (optional)"
+                          placeholder="Root Dept Name"
                           value={sourceEdit.rootDeptName}
                           onChange={(event) => updateSourceEdit('rootDeptName', event.target.value)}
                         />
@@ -1252,22 +2866,22 @@ function App() {
                       </div>
                     )}
 
-                    <label className="field-label" htmlFor="strategy-config">
-                      Strategy Config (JSON object)
+                    <label className="field-label" htmlFor="edit-strategy-config">
+                      Strategy Config
                     </label>
                     <textarea
-                      id="strategy-config"
+                      id="edit-strategy-config"
                       className="json-editor"
                       rows={4}
                       value={sourceEdit.strategyConfigJson}
                       onChange={(event) => updateSourceEdit('strategyConfigJson', event.target.value)}
                     />
 
-                    <label className="field-label" htmlFor="job-config">
-                      Job Config (JSON object)
+                    <label className="field-label" htmlFor="edit-job-config">
+                      Job Config
                     </label>
                     <textarea
-                      id="job-config"
+                      id="edit-job-config"
                       className="json-editor"
                       rows={4}
                       value={sourceEdit.jobConfigJson}
@@ -1278,11 +2892,20 @@ function App() {
 
                     <div className="action-row">
                       <button type="submit">Save Changes</button>
-                      <button type="button" className="secondary-btn" onClick={resetSourceEdit}>
+                      <button
+                        type="button"
+                        className="secondary-btn"
+                        onClick={() => {
+                          const target = sources.find((source) => source.code === selectedSourceCode)
+                          if (target) {
+                            setSourceEdit(sourceDraftFromEntity(target))
+                          }
+                        }}
+                      >
                         Reset
                       </button>
                       <button type="button" className="info-btn" onClick={() => void handleTriggerSync(sourceEdit.code)}>
-                        Sync now
+                        Sync Now
                       </button>
                       <button type="button" className="danger-btn" onClick={() => void handleDeleteSource()}>
                         Delete
@@ -1292,6 +2915,521 @@ function App() {
                 )}
               </section>
             </div>
+          </div>
+        )}
+
+        {activeTab === 'rbac' && (
+          <div className="panel">
+            <h2>RBAC</h2>
+            <p className="section-hint">Manage permissions, roles, role bindings, and user grants.</p>
+            <div className="detail-layout">
+              <section className="list-panel">
+                <h3>Permissions</h3>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Code</th>
+                      <th>Name</th>
+                      <th>Resource</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {permissions.length === 0 && (
+                      <tr>
+                        <td colSpan={4} className="empty-cell">
+                          No permissions found.
+                        </td>
+                      </tr>
+                    )}
+                    {permissions.map((permission) => (
+                      <tr key={permission.id}>
+                        <td>{permission.code}</td>
+                        <td>{permission.name}</td>
+                        <td>{permission.resource}</td>
+                        <td>{permission.action}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+
+                <h3 className="nested-title">Roles</h3>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {roles.length === 0 && (
+                      <tr>
+                        <td colSpan={2} className="empty-cell">
+                          No roles found.
+                        </td>
+                      </tr>
+                    )}
+                    {roles.map((role) => {
+                      const roleName = normalizeRoleName(role)
+                      return (
+                        <tr key={role.id}>
+                          <td>{roleName || '-'}</td>
+                          <td>
+                            {roleName && roleName !== 'Administrator' && (
+                              <button onClick={() => void handleDeleteRole(roleName)}>Delete</button>
+                            )}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </section>
+
+              <section className="detail-panel">
+                <form onSubmit={handleCreatePermission} className="config-form create-section">
+                  <h3>Create Permission</h3>
+                  <div className="inline-form">
+                    <input
+                      placeholder="Code"
+                      value={permissionCreate.code}
+                      onChange={(event) => updatePermissionCreate('code', event.target.value)}
+                      required
+                    />
+                    <input
+                      placeholder="Name"
+                      value={permissionCreate.name}
+                      onChange={(event) => updatePermissionCreate('name', event.target.value)}
+                      required
+                    />
+                    <input
+                      placeholder="Resource"
+                      value={permissionCreate.resource}
+                      onChange={(event) => updatePermissionCreate('resource', event.target.value)}
+                      required
+                    />
+                    <input
+                      placeholder="Action"
+                      value={permissionCreate.action}
+                      onChange={(event) => updatePermissionCreate('action', event.target.value)}
+                      required
+                    />
+                    <button type="submit">Create</button>
+                  </div>
+                  <input
+                    className="long-input"
+                    placeholder="Description (optional)"
+                    value={permissionCreate.description}
+                    onChange={(event) => updatePermissionCreate('description', event.target.value)}
+                  />
+                </form>
+
+                <form onSubmit={handleCreateRole} className="config-form create-section">
+                  <h3>Create Role</h3>
+                  <div className="inline-form">
+                    <input
+                      placeholder="Role Name"
+                      value={roleCreateName}
+                      onChange={(event) => setRoleCreateName(event.target.value)}
+                      required
+                    />
+                    <button type="submit">Create</button>
+                  </div>
+                </form>
+
+                <form onSubmit={handleAssignRolePermission} className="config-form create-section">
+                  <h3>Role Permission Binding</h3>
+                  <div className="inline-form">
+                    <select
+                      value={rolePermissionDraft.roleName}
+                      onChange={(event) => updateRolePermission('roleName', event.target.value)}
+                    >
+                      <option value="">Select role</option>
+                      {selectableRoleNames.map((roleName) => (
+                        <option key={roleName} value={roleName}>
+                          {roleName}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      value={rolePermissionDraft.permissionCode}
+                      onChange={(event) => updateRolePermission('permissionCode', event.target.value)}
+                    >
+                      <option value="">Select permission</option>
+                      {selectablePermissionCodes.map((permissionCode) => (
+                        <option key={permissionCode} value={permissionCode}>
+                          {permissionCode}
+                        </option>
+                      ))}
+                    </select>
+                    <button type="submit">Assign</button>
+                    <button type="button" className="danger-btn" onClick={() => void handleRemoveRolePermission()}>
+                      Remove
+                    </button>
+                  </div>
+                </form>
+
+                <form onSubmit={handleGrantUserPermission} className="config-form create-section">
+                  <h3>User Permission Grant</h3>
+                  <div className="inline-form">
+                    <select value={userGrantDraft.userId} onChange={(event) => updateUserGrant('userId', event.target.value)}>
+                      <option value="">Select user</option>
+                      {users.map((user) => (
+                        <option key={user.id} value={user.id}>
+                          {user.userName}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      value={userGrantDraft.permissionCode}
+                      onChange={(event) => updateUserGrant('permissionCode', event.target.value)}
+                    >
+                      <option value="">Select permission</option>
+                      {selectablePermissionCodes.map((permissionCode) => (
+                        <option key={permissionCode} value={permissionCode}>
+                          {permissionCode}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      value={userGrantDraft.effect}
+                      onChange={(event) => updateUserGrant('effect', event.target.value as PermissionGrantEffectValue)}
+                    >
+                      <option value="1">Allow</option>
+                      <option value="2">Deny</option>
+                    </select>
+                    <button type="submit">Grant</button>
+                  </div>
+                </form>
+
+                <form onSubmit={handleInspectUserPermissions} className="config-form create-section">
+                  <h3>Inspect Effective Permissions</h3>
+                  <div className="inline-form">
+                    <input
+                      placeholder="User Id"
+                      value={rbacInspectUserId}
+                      onChange={(event) => setRbacInspectUserId(event.target.value)}
+                      required
+                    />
+                    <button type="submit">Load</button>
+                  </div>
+                  <pre className="json-preview">{JSON.stringify(rbacInspectPermissions, null, 2)}</pre>
+                </form>
+              </section>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'saml' && (
+          <div className="panel">
+            <h2>SAML Service Providers</h2>
+            <p className="section-hint">Manage SAML SP metadata entries for SSO routing.</p>
+
+            <form onSubmit={handleCreateSamlProvider} className="config-form create-section">
+              <h3>Create / Upsert SAML SP</h3>
+              <div className="inline-form">
+                <input
+                  placeholder="Code"
+                  value={samlCreate.code}
+                  onChange={(event) => updateSamlCreate('code', event.target.value)}
+                  required
+                />
+                <input
+                  placeholder="Name"
+                  value={samlCreate.name}
+                  onChange={(event) => updateSamlCreate('name', event.target.value)}
+                  required
+                />
+                <input
+                  placeholder="Entity ID"
+                  value={samlCreate.entityId}
+                  onChange={(event) => updateSamlCreate('entityId', event.target.value)}
+                  required
+                />
+              </div>
+              <div className="inline-form">
+                <input
+                  placeholder="ACS URL"
+                  value={samlCreate.assertionConsumerServiceUrl}
+                  onChange={(event) => updateSamlCreate('assertionConsumerServiceUrl', event.target.value)}
+                  required
+                />
+                <input
+                  placeholder="SLO URL (optional)"
+                  value={samlCreate.singleLogoutServiceUrl}
+                  onChange={(event) => updateSamlCreate('singleLogoutServiceUrl', event.target.value)}
+                />
+              </div>
+              <div className="inline-form">
+                <input
+                  placeholder="NameIdFormat"
+                  value={samlCreate.nameIdFormat}
+                  onChange={(event) => updateSamlCreate('nameIdFormat', event.target.value)}
+                />
+                <input
+                  placeholder="Audience (optional)"
+                  value={samlCreate.audience}
+                  onChange={(event) => updateSamlCreate('audience', event.target.value)}
+                />
+                <input
+                  placeholder="RelayState default (optional)"
+                  value={samlCreate.relayStateDefault}
+                  onChange={(event) => updateSamlCreate('relayStateDefault', event.target.value)}
+                />
+              </div>
+              <div className="inline-form">
+                <select
+                  value={samlCreate.bindingType}
+                  onChange={(event) => updateSamlCreate('bindingType', event.target.value as SamlBindingTypeValue)}
+                >
+                  <option value="1">HTTP-POST</option>
+                  <option value="2">HTTP-Redirect</option>
+                </select>
+                <label className="checkbox-row">
+                  <input
+                    type="checkbox"
+                    checked={samlCreate.wantSignedAssertions}
+                    onChange={(event) => updateSamlCreate('wantSignedAssertions', event.target.checked)}
+                  />
+                  Want Signed Assertions
+                </label>
+                <label className="checkbox-row">
+                  <input
+                    type="checkbox"
+                    checked={samlCreate.allowUnsolicitedResponse}
+                    onChange={(event) => updateSamlCreate('allowUnsolicitedResponse', event.target.checked)}
+                  />
+                  Allow Unsolicited
+                </label>
+                <label className="checkbox-row">
+                  <input
+                    type="checkbox"
+                    checked={samlCreate.enabled}
+                    onChange={(event) => updateSamlCreate('enabled', event.target.checked)}
+                  />
+                  Enabled
+                </label>
+                <button type="submit">Upsert</button>
+              </div>
+              <textarea
+                className="json-editor"
+                rows={4}
+                placeholder="Signing Certificate PEM (optional)"
+                value={samlCreate.signingCertificatePem}
+                onChange={(event) => updateSamlCreate('signingCertificatePem', event.target.value)}
+              />
+            </form>
+
+            <div className="detail-layout">
+              <section className="list-panel">
+                <h3>SAML SP List</h3>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Code</th>
+                      <th>Name</th>
+                      <th>Binding</th>
+                      <th>Enabled</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {samlProviders.length === 0 && (
+                      <tr>
+                        <td colSpan={4} className="empty-cell">
+                          No SAML service providers found.
+                        </td>
+                      </tr>
+                    )}
+                    {samlProviders.map((provider) => (
+                      <tr
+                        key={provider.id}
+                        className={`clickable-row ${selectedSamlCode === provider.code ? 'active-row' : ''}`}
+                        onClick={() => setSelectedSamlCode(provider.code)}
+                      >
+                        <td>{provider.code}</td>
+                        <td>{provider.name}</td>
+                        <td>{provider.bindingType === 2 ? 'HTTP-Redirect' : 'HTTP-POST'}</td>
+                        <td>{provider.enabled ? 'Yes' : 'No'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </section>
+              <section className="detail-panel">
+                <h3>SAML SP Detail</h3>
+                {!samlEdit && <p className="empty-hint">Select a SAML service provider to edit.</p>}
+                {samlEdit && (
+                  <form onSubmit={handleSaveSamlProvider} className="config-form">
+                    <div className="inline-form">
+                      <input value={samlEdit.code} disabled className="readonly-input" />
+                      <input
+                        placeholder="Name"
+                        value={samlEdit.name}
+                        onChange={(event) => updateSamlEdit('name', event.target.value)}
+                        required
+                      />
+                      <input
+                        placeholder="Entity ID"
+                        value={samlEdit.entityId}
+                        onChange={(event) => updateSamlEdit('entityId', event.target.value)}
+                        required
+                      />
+                    </div>
+                    <div className="inline-form">
+                      <input
+                        placeholder="ACS URL"
+                        value={samlEdit.assertionConsumerServiceUrl}
+                        onChange={(event) => updateSamlEdit('assertionConsumerServiceUrl', event.target.value)}
+                        required
+                      />
+                      <input
+                        placeholder="SLO URL"
+                        value={samlEdit.singleLogoutServiceUrl}
+                        onChange={(event) => updateSamlEdit('singleLogoutServiceUrl', event.target.value)}
+                      />
+                    </div>
+                    <div className="inline-form">
+                      <input
+                        placeholder="NameIdFormat"
+                        value={samlEdit.nameIdFormat}
+                        onChange={(event) => updateSamlEdit('nameIdFormat', event.target.value)}
+                      />
+                      <input
+                        placeholder="Audience"
+                        value={samlEdit.audience}
+                        onChange={(event) => updateSamlEdit('audience', event.target.value)}
+                      />
+                      <input
+                        placeholder="RelayState default"
+                        value={samlEdit.relayStateDefault}
+                        onChange={(event) => updateSamlEdit('relayStateDefault', event.target.value)}
+                      />
+                    </div>
+                    <div className="inline-form">
+                      <select
+                        value={samlEdit.bindingType}
+                        onChange={(event) => updateSamlEdit('bindingType', event.target.value as SamlBindingTypeValue)}
+                      >
+                        <option value="1">HTTP-POST</option>
+                        <option value="2">HTTP-Redirect</option>
+                      </select>
+                      <label className="checkbox-row">
+                        <input
+                          type="checkbox"
+                          checked={samlEdit.wantSignedAssertions}
+                          onChange={(event) => updateSamlEdit('wantSignedAssertions', event.target.checked)}
+                        />
+                        Want Signed Assertions
+                      </label>
+                      <label className="checkbox-row">
+                        <input
+                          type="checkbox"
+                          checked={samlEdit.allowUnsolicitedResponse}
+                          onChange={(event) => updateSamlEdit('allowUnsolicitedResponse', event.target.checked)}
+                        />
+                        Allow Unsolicited
+                      </label>
+                      <label className="checkbox-row">
+                        <input
+                          type="checkbox"
+                          checked={samlEdit.enabled}
+                          onChange={(event) => updateSamlEdit('enabled', event.target.checked)}
+                        />
+                        Enabled
+                      </label>
+                    </div>
+                    <textarea
+                      className="json-editor"
+                      rows={4}
+                      placeholder="Signing Certificate PEM"
+                      value={samlEdit.signingCertificatePem}
+                      onChange={(event) => updateSamlEdit('signingCertificatePem', event.target.value)}
+                    />
+                    <div className="action-row">
+                      <button type="submit">Save Changes</button>
+                      <button
+                        type="button"
+                        className="secondary-btn"
+                        onClick={() => {
+                          const target = samlProviders.find((provider) => provider.code === selectedSamlCode)
+                          if (target) {
+                            setSamlEdit(samlDraftFromEntity(target))
+                          }
+                        }}
+                      >
+                        Reset
+                      </button>
+                      <button type="button" className="danger-btn" onClick={() => void handleDeleteSamlProvider()}>
+                        Delete
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </section>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'scim' && (
+          <div className="panel">
+            <h2>SCIM Tokens</h2>
+            <p className="section-hint">Create and revoke SCIM access tokens.</p>
+            <form onSubmit={handleCreateScimToken} className="config-form create-section">
+              <h3>Create SCIM Token</h3>
+              <div className="inline-form">
+                <input
+                  placeholder="Token Name"
+                  value={scimCreate.name}
+                  onChange={(event) => updateScimCreate('name', event.target.value)}
+                  required
+                />
+                <input
+                  type="number"
+                  min="1"
+                  placeholder="Expires In Days"
+                  value={scimCreate.expiresInDays}
+                  onChange={(event) => updateScimCreate('expiresInDays', event.target.value)}
+                  required
+                />
+                <button type="submit">Create</button>
+              </div>
+            </form>
+
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Active</th>
+                  <th>Expires</th>
+                  <th>Last Used</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {scimTokens.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="empty-cell">
+                      No SCIM tokens found.
+                    </td>
+                  </tr>
+                )}
+                {scimTokens.map((token) => (
+                  <tr key={token.id}>
+                    <td>{token.name}</td>
+                    <td>{token.isActive ? 'Yes' : 'No'}</td>
+                    <td>{formatDateTime(token.expiresTime)}</td>
+                    <td>{formatDateTime(token.lastUsedTime)}</td>
+                    <td>
+                      {token.isActive && (
+                        <button className="danger-btn" onClick={() => void handleRevokeScimToken(token)}>
+                          Revoke
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
 
@@ -1308,9 +3446,16 @@ function App() {
                 </tr>
               </thead>
               <tbody>
+                {audits.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="empty-cell">
+                      No audit events found.
+                    </td>
+                  </tr>
+                )}
                 {audits.map((audit) => (
                   <tr key={audit.id}>
-                    <td>{new Date(audit.occurredTime).toLocaleString()}</td>
+                    <td>{formatDateTime(audit.occurredTime)}</td>
                     <td>{audit.eventType}</td>
                     <td>{audit.resultStatus}</td>
                     <td>{audit.content}</td>

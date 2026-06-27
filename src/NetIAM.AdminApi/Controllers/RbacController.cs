@@ -1,7 +1,9 @@
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using NetIAM.Domain.Enums;
 using NetIAM.Infrastructure.Authorization;
+using NetIAM.Infrastructure.Persistence;
 using NetIAM.Infrastructure.Services;
 
 namespace NetIAM.AdminApi.Controllers;
@@ -11,6 +13,7 @@ namespace NetIAM.AdminApi.Controllers;
 public sealed class RbacController(
     IRbacService rbacService,
     RoleManager<IdentityRole> roleManager,
+    NetIamDbContext dbContext,
     ITenantContextAccessor tenantContextAccessor,
     IAuditService auditService) : ControllerBase
 {
@@ -20,6 +23,8 @@ public sealed class RbacController(
         string Resource,
         string Action,
         string? Description = null);
+
+    public sealed record CreateRoleRequest(string Name);
 
     public sealed record UserGrantRequest(string PermissionCode, PermissionGrantEffect Effect);
 
@@ -58,6 +63,81 @@ public sealed class RbacController(
             .OrderBy(x => x.Name)
             .ToList();
         return Ok(roles);
+    }
+
+    [HttpPost("roles")]
+    [RequirePermission("rbac.write")]
+    public async Task<IActionResult> CreateRole([FromBody] CreateRoleRequest request, CancellationToken cancellationToken)
+    {
+        var tenantId = tenantContextAccessor.GetTenantId();
+        if (string.IsNullOrWhiteSpace(request.Name))
+        {
+            return BadRequest("Role name is required.");
+        }
+
+        if (await roleManager.RoleExistsAsync(request.Name))
+        {
+            return Conflict($"Role already exists: {request.Name}.");
+        }
+
+        var result = await roleManager.CreateAsync(new IdentityRole(request.Name));
+        if (!result.Succeeded)
+        {
+            return BadRequest(result.Errors.Select(x => x.Description));
+        }
+
+        await auditService.WriteAsync(
+            new AuditWriteRequest(
+                tenantId,
+                "admin.rbac.role.created",
+                $"Role {request.Name} created."),
+            cancellationToken);
+
+        var role = await roleManager.FindByNameAsync(request.Name);
+        return Ok(new { role?.Id, role?.Name });
+    }
+
+    [HttpDelete("roles/{roleName}")]
+    [RequirePermission("rbac.write")]
+    public async Task<IActionResult> DeleteRole(string roleName, CancellationToken cancellationToken)
+    {
+        var tenantId = tenantContextAccessor.GetTenantId();
+        if (string.Equals(roleName, "Administrator", StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest("Administrator role cannot be deleted.");
+        }
+
+        var role = await roleManager.FindByNameAsync(roleName);
+        if (role is null)
+        {
+            return NotFound();
+        }
+
+        var rolePermissions = await dbContext.RolePermissions
+            .Where(x => x.TenantId == tenantId && x.RoleId == role.Id && !x.IsDeleted)
+            .ToListAsync(cancellationToken);
+        foreach (var rolePermission in rolePermissions)
+        {
+            rolePermission.IsDeleted = true;
+            rolePermission.UpdateTime = DateTimeOffset.UtcNow;
+        }
+
+        var result = await roleManager.DeleteAsync(role);
+        if (!result.Succeeded)
+        {
+            return BadRequest(result.Errors.Select(x => x.Description));
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        await auditService.WriteAsync(
+            new AuditWriteRequest(
+                tenantId,
+                "admin.rbac.role.deleted",
+                $"Role {roleName} deleted."),
+            cancellationToken);
+
+        return NoContent();
     }
 
     [HttpPost("roles/{roleName}/permissions/{permissionCode}")]
