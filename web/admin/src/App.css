@@ -86,6 +86,7 @@
   display: flex;
   gap: 0.55rem;
   margin-bottom: 0.8rem;
+  flex-wrap: wrap;
 }
 
 .inline-form input,
@@ -105,6 +106,35 @@
   padding: 0.45rem 0.75rem;
   font-weight: 600;
   cursor: pointer;
+}
+
+.config-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin-bottom: 0.8rem;
+}
+
+.config-form .inline-form {
+  margin-bottom: 0;
+}
+
+.config-note {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 0.85rem;
+}
+
+.config-note code {
+  color: #bfdbfe;
+}
+
+.checkbox-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #cbd5e1;
+  font-size: 0.9rem;
 }
 
 table {

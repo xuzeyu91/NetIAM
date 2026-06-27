@@ -16,13 +16,13 @@ public sealed class WeComDirectorySyncProvider(HttpClient httpClient) : IDirecto
         CancellationToken cancellationToken = default)
     {
         var config = ProviderConfigParser.ParseIdentitySourceConfig(identitySource);
-        if (UseMock(config) || !HasCredentials(config, "corpId", "appSecret"))
+        if (UseMock(config) || !HasCredentials(config, "corpId", "appSecret", "corpSecret"))
         {
             return ReadOrganizationsFromConfig(config);
         }
 
         var corpId = ProviderConfigParser.RequiredString(config, "corpId");
-        var appSecret = ProviderConfigParser.RequiredString(config, "appSecret");
+        var appSecret = ProviderConfigParser.RequiredStringAny(config, "appSecret", "corpSecret");
         var token = await GetAccessTokenAsync(corpId, appSecret, cancellationToken);
 
         using var response = await httpClient.GetAsync(
@@ -59,13 +59,13 @@ public sealed class WeComDirectorySyncProvider(HttpClient httpClient) : IDirecto
         CancellationToken cancellationToken = default)
     {
         var config = ProviderConfigParser.ParseIdentitySourceConfig(identitySource);
-        if (UseMock(config) || !HasCredentials(config, "corpId", "appSecret"))
+        if (UseMock(config) || !HasCredentials(config, "corpId", "appSecret", "corpSecret"))
         {
             return ReadUsersFromConfig(config);
         }
 
         var corpId = ProviderConfigParser.RequiredString(config, "corpId");
-        var appSecret = ProviderConfigParser.RequiredString(config, "appSecret");
+        var appSecret = ProviderConfigParser.RequiredStringAny(config, "appSecret", "corpSecret");
         var token = await GetAccessTokenAsync(corpId, appSecret, cancellationToken);
         var organizations = await PullOrganizationsAsync(identitySource, cancellationToken);
         var fetchUserDetail = ProviderConfigParser.OptionalBoolean(config, "fetchUserDetail", true);
@@ -158,10 +158,22 @@ public sealed class WeComDirectorySyncProvider(HttpClient httpClient) : IDirecto
         return ProviderConfigParser.OptionalBoolean(config, "useMock", false);
     }
 
-    private static bool HasCredentials(JsonElement config, string keyA, string keyB)
+    private static bool HasCredentials(JsonElement config, string firstKey, params string[] secondKeys)
     {
-        return !string.IsNullOrWhiteSpace(ProviderConfigParser.OptionalString(config, keyA))
-               && !string.IsNullOrWhiteSpace(ProviderConfigParser.OptionalString(config, keyB));
+        if (string.IsNullOrWhiteSpace(ProviderConfigParser.OptionalString(config, firstKey)))
+        {
+            return false;
+        }
+
+        foreach (var secondKey in secondKeys)
+        {
+            if (!string.IsNullOrWhiteSpace(ProviderConfigParser.OptionalString(config, secondKey)))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static void ThrowIfApiError(JsonElement payload)
