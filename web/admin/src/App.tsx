@@ -7,8 +7,10 @@ import './App.css'
 type AdminTab =
   | 'tenants'
   | 'users'
+  | 'userGroups'
   | 'organizations'
   | 'apps'
+  | 'accessPolicies'
   | 'providers'
   | 'sources'
   | 'rbac'
@@ -19,6 +21,7 @@ type AdminTab =
 type ProviderTypeValue = '1' | '2' | '3'
 type PermissionGrantEffectValue = '1' | '2'
 type SamlBindingTypeValue = '1' | '2'
+type SubjectTypeValue = '1' | '2' | '3'
 
 type TenantItem = {
   id: string
@@ -116,6 +119,36 @@ type ScimTokenItem = {
   expiresTime?: string
   lastUsedTime?: string
   createTime?: string
+}
+
+type UserGroupItem = {
+  id: string
+  name: string
+  description?: string
+  memberCount: number
+  createTime?: string
+  updateTime?: string
+}
+
+type UserGroupMemberItem = {
+  id: string
+  userName: string
+  displayName: string
+  email?: string
+  phoneNumber?: string
+}
+
+type AppAccessPolicyItem = {
+  id: string
+  appId: string
+  appCode?: string
+  appName?: string
+  subjectType: number
+  subjectId: string
+  subjectName?: string
+  allowAccess: boolean
+  createTime?: string
+  updateTime?: string
 }
 
 type AuditItem = {
@@ -235,11 +268,25 @@ type ScimTokenDraft = {
   expiresInDays: string
 }
 
+type UserGroupDraft = {
+  name: string
+  description: string
+}
+
+type AppAccessPolicyDraft = {
+  appId: string
+  subjectType: SubjectTypeValue
+  subjectId: string
+  allowAccess: boolean
+}
+
 const tabs: Array<{ id: AdminTab; label: string }> = [
   { id: 'tenants', label: 'Tenants' },
   { id: 'users', label: 'Users' },
+  { id: 'userGroups', label: 'User Groups' },
   { id: 'organizations', label: 'Organizations' },
   { id: 'apps', label: 'Apps' },
+  { id: 'accessPolicies', label: 'Access Policies' },
   { id: 'providers', label: 'Identity Providers' },
   { id: 'sources', label: 'Identity Sources' },
   { id: 'rbac', label: 'RBAC' },
@@ -320,6 +367,30 @@ function toSamlBindingTypeValue(value: number): SamlBindingTypeValue {
   }
 
   return '1'
+}
+
+function toSubjectTypeValue(value: number): SubjectTypeValue {
+  if (value === 2) {
+    return '2'
+  }
+
+  if (value === 3) {
+    return '3'
+  }
+
+  return '1'
+}
+
+function toSubjectTypeLabel(value: number): string {
+  if (value === 2) {
+    return 'Group'
+  }
+
+  if (value === 3) {
+    return 'Organization'
+  }
+
+  return 'User'
 }
 
 function isJsonObjectText(text: string): boolean {
@@ -669,6 +740,46 @@ function createDefaultScimTokenDraft(): ScimTokenDraft {
   }
 }
 
+function createDefaultUserGroupDraft(): UserGroupDraft {
+  return {
+    name: '',
+    description: '',
+  }
+}
+
+function userGroupDraftFromEntity(group: UserGroupItem): UserGroupDraft {
+  return {
+    name: group.name,
+    description: group.description ?? '',
+  }
+}
+
+function createDefaultAppAccessPolicyDraft(appId = ''): AppAccessPolicyDraft {
+  return {
+    appId,
+    subjectType: '1',
+    subjectId: '',
+    allowAccess: true,
+  }
+}
+
+function appAccessPolicyDraftFromEntity(policy: AppAccessPolicyItem): AppAccessPolicyDraft {
+  return {
+    appId: policy.appId,
+    subjectType: toSubjectTypeValue(policy.subjectType),
+    subjectId: policy.subjectId,
+    allowAccess: policy.allowAccess,
+  }
+}
+
+function normalizeUserIdList(rawText: string): string[] {
+  return rawText
+    .split(/[\r\n,;]+/g)
+    .map((item) => item.trim())
+    .filter((item) => !!item)
+    .filter((item, index, values) => values.indexOf(item) === index)
+}
+
 function App() {
   const [requestContext, setRequestContext] = useState<RequestContext>(() => createInitialRequestContext())
   const [activeTab, setActiveTab] = useState<AdminTab>('tenants')
@@ -686,12 +797,16 @@ function App() {
   const [roles, setRoles] = useState<RoleItem[]>([])
   const [samlProviders, setSamlProviders] = useState<SamlServiceProviderItem[]>([])
   const [scimTokens, setScimTokens] = useState<ScimTokenItem[]>([])
+  const [userGroups, setUserGroups] = useState<UserGroupItem[]>([])
+  const [appAccessPolicies, setAppAccessPolicies] = useState<AppAccessPolicyItem[]>([])
   const [audits, setAudits] = useState<AuditItem[]>([])
 
   const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null)
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null)
+  const [selectedUserGroupId, setSelectedUserGroupId] = useState<string | null>(null)
   const [selectedOrganizationId, setSelectedOrganizationId] = useState<string | null>(null)
   const [selectedAppId, setSelectedAppId] = useState<string | null>(null)
+  const [selectedAccessPolicyId, setSelectedAccessPolicyId] = useState<string | null>(null)
   const [selectedProviderCode, setSelectedProviderCode] = useState<string | null>(null)
   const [selectedSourceCode, setSelectedSourceCode] = useState<string | null>(null)
   const [selectedSamlCode, setSelectedSamlCode] = useState<string | null>(null)
@@ -701,12 +816,18 @@ function App() {
 
   const [userCreate, setUserCreate] = useState<UserCreateDraft>(() => createDefaultUserCreateDraft())
   const [userEdit, setUserEdit] = useState<UserEditDraft | null>(null)
+  const [userGroupCreate, setUserGroupCreate] = useState<UserGroupDraft>(() => createDefaultUserGroupDraft())
+  const [userGroupEdit, setUserGroupEdit] = useState<UserGroupDraft | null>(null)
+  const [userGroupMembers, setUserGroupMembers] = useState<UserGroupMemberItem[]>([])
+  const [userGroupMemberIdsText, setUserGroupMemberIdsText] = useState('')
 
   const [organizationCreate, setOrganizationCreate] = useState<OrganizationDraft>(() => createDefaultOrganizationDraft())
   const [organizationEdit, setOrganizationEdit] = useState<OrganizationDraft | null>(null)
 
   const [appCreate, setAppCreate] = useState<AppCreateDraft>(() => createDefaultAppCreateDraft())
   const [appEdit, setAppEdit] = useState<AppEditDraft | null>(null)
+  const [accessPolicyCreate, setAccessPolicyCreate] = useState<AppAccessPolicyDraft>(() => createDefaultAppAccessPolicyDraft())
+  const [accessPolicyEdit, setAccessPolicyEdit] = useState<AppAccessPolicyDraft | null>(null)
 
   const [providerCreate, setProviderCreate] = useState<ProviderDraft>(() => createDefaultProviderDraft())
   const [providerEdit, setProviderEdit] = useState<ProviderDraft | null>(null)
@@ -731,8 +852,10 @@ function App() {
     () => [
       { label: 'Tenants', value: tenants.length },
       { label: 'Users', value: users.length },
+      { label: 'User Groups', value: userGroups.length },
       { label: 'Organizations', value: organizations.length },
       { label: 'Apps', value: apps.length },
+      { label: 'Access Policies', value: appAccessPolicies.length },
       { label: 'Providers', value: providers.length },
       { label: 'Sources', value: sources.length },
       { label: 'SAML SP', value: samlProviders.length },
@@ -740,6 +863,7 @@ function App() {
       { label: 'Audits', value: audits.length },
     ],
     [
+      appAccessPolicies.length,
       apps.length,
       audits.length,
       organizations.length,
@@ -748,6 +872,7 @@ function App() {
       scimTokens.length,
       sources.length,
       tenants.length,
+      userGroups.length,
       users.length,
     ],
   )
@@ -781,6 +906,34 @@ function App() {
     [permissions],
   )
 
+  const createSubjectOptions = useMemo(() => {
+    if (accessPolicyCreate.subjectType === '2') {
+      return userGroups.map((group) => ({ id: group.id, label: group.name }))
+    }
+
+    if (accessPolicyCreate.subjectType === '3') {
+      return organizations.map((organization) => ({ id: organization.id, label: organization.displayPath }))
+    }
+
+    return users.map((user) => ({ id: user.id, label: `${user.userName} (${user.displayName})` }))
+  }, [accessPolicyCreate.subjectType, organizations, userGroups, users])
+
+  const editSubjectOptions = useMemo(() => {
+    if (!accessPolicyEdit) {
+      return Array<{ id: string; label: string }>()
+    }
+
+    if (accessPolicyEdit.subjectType === '2') {
+      return userGroups.map((group) => ({ id: group.id, label: group.name }))
+    }
+
+    if (accessPolicyEdit.subjectType === '3') {
+      return organizations.map((organization) => ({ id: organization.id, label: organization.displayPath }))
+    }
+
+    return users.map((user) => ({ id: user.id, label: `${user.userName} (${user.displayName})` }))
+  }, [accessPolicyEdit, organizations, userGroups, users])
+
   useEffect(() => {
     persistRequestContext(requestContext)
   }, [requestContext])
@@ -806,8 +959,10 @@ function App() {
       const [
         tenantData,
         userData,
+        userGroupData,
         organizationData,
         appData,
+        accessPolicyData,
         providerData,
         sourceData,
         permissionData,
@@ -818,8 +973,10 @@ function App() {
       ] = await Promise.all([
         requestJson<TenantItem[]>(requestContext, '/api/admin/tenants'),
         requestJson<UserItem[]>(requestContext, '/api/admin/users'),
+        requestJson<UserGroupItem[]>(requestContext, '/api/admin/user-groups'),
         requestJson<OrganizationItem[]>(requestContext, '/api/admin/organizations'),
         requestJson<AppItem[]>(requestContext, '/api/admin/apps'),
+        requestJson<AppAccessPolicyItem[]>(requestContext, '/api/admin/app-access-policies'),
         requestJson<IdentityProviderItem[]>(requestContext, '/api/admin/identity-providers'),
         requestJson<IdentitySourceItem[]>(requestContext, '/api/admin/identity-sources'),
         requestJson<PermissionItem[]>(requestContext, '/api/admin/rbac/permissions'),
@@ -831,8 +988,10 @@ function App() {
 
       setTenants(tenantData)
       setUsers(userData)
+      setUserGroups(userGroupData)
       setOrganizations(organizationData)
       setApps(appData)
+      setAppAccessPolicies(accessPolicyData)
       setProviders(providerData)
       setSources(sourceData)
       setPermissions(permissionData)
@@ -884,6 +1043,45 @@ function App() {
   }, [selectedUserId, users])
 
   useEffect(() => {
+    if (!selectedUserGroupId) {
+      setUserGroupEdit(null)
+      setUserGroupMembers([])
+      setUserGroupMemberIdsText('')
+      return
+    }
+
+    const selected = userGroups.find((group) => group.id === selectedUserGroupId)
+    if (!selected) {
+      setSelectedUserGroupId(null)
+      setUserGroupEdit(null)
+      setUserGroupMembers([])
+      setUserGroupMemberIdsText('')
+      return
+    }
+
+    setUserGroupEdit(userGroupDraftFromEntity(selected))
+  }, [selectedUserGroupId, userGroups])
+
+  useEffect(() => {
+    if (!selectedUserGroupId) {
+      return
+    }
+
+    void (async () => {
+      try {
+        const members = await requestJson<UserGroupMemberItem[]>(
+          requestContext,
+          `/api/admin/user-groups/${encodeURIComponent(selectedUserGroupId)}/members`,
+        )
+        setUserGroupMembers(members)
+        setUserGroupMemberIdsText(members.map((member) => member.id).join('\n'))
+      } catch (requestError) {
+        setError(requestError instanceof Error ? requestError.message : 'Failed to load user group members.')
+      }
+    })()
+  }, [requestContext, selectedUserGroupId])
+
+  useEffect(() => {
     if (!selectedOrganizationId) {
       setOrganizationEdit(null)
       return
@@ -914,6 +1112,22 @@ function App() {
 
     setAppEdit(appEditDraftFromEntity(selected))
   }, [apps, selectedAppId])
+
+  useEffect(() => {
+    if (!selectedAccessPolicyId) {
+      setAccessPolicyEdit(null)
+      return
+    }
+
+    const selected = appAccessPolicies.find((policy) => policy.id === selectedAccessPolicyId)
+    if (!selected) {
+      setSelectedAccessPolicyId(null)
+      setAccessPolicyEdit(null)
+      return
+    }
+
+    setAccessPolicyEdit(appAccessPolicyDraftFromEntity(selected))
+  }, [appAccessPolicies, selectedAccessPolicyId])
 
   useEffect(() => {
     if (!selectedProviderCode) {
@@ -987,6 +1201,32 @@ function App() {
     }
   }, [userGrantDraft.userId, users])
 
+  useEffect(() => {
+    if (!accessPolicyCreate.appId && apps.length > 0) {
+      setAccessPolicyCreate((previous) => ({ ...previous, appId: apps[0].id }))
+    }
+  }, [accessPolicyCreate.appId, apps])
+
+  useEffect(() => {
+    if (accessPolicyCreate.subjectId) {
+      return
+    }
+
+    if (accessPolicyCreate.subjectType === '1' && users.length > 0) {
+      setAccessPolicyCreate((previous) => ({ ...previous, subjectId: users[0].id }))
+      return
+    }
+
+    if (accessPolicyCreate.subjectType === '2' && userGroups.length > 0) {
+      setAccessPolicyCreate((previous) => ({ ...previous, subjectId: userGroups[0].id }))
+      return
+    }
+
+    if (accessPolicyCreate.subjectType === '3' && organizations.length > 0) {
+      setAccessPolicyCreate((previous) => ({ ...previous, subjectId: organizations[0].id }))
+    }
+  }, [accessPolicyCreate.subjectId, accessPolicyCreate.subjectType, organizations, userGroups, users])
+
   function updateRequestContextField<K extends keyof RequestContext>(key: K, value: RequestContext[K]) {
     setRequestContext((previous) => ({ ...previous, [key]: value }))
   }
@@ -1013,6 +1253,14 @@ function App() {
     setUserEdit((previous) => (previous ? { ...previous, [key]: value } : previous))
   }
 
+  function updateUserGroupCreate<K extends keyof UserGroupDraft>(key: K, value: UserGroupDraft[K]) {
+    setUserGroupCreate((previous) => ({ ...previous, [key]: value }))
+  }
+
+  function updateUserGroupEdit<K extends keyof UserGroupDraft>(key: K, value: UserGroupDraft[K]) {
+    setUserGroupEdit((previous) => (previous ? { ...previous, [key]: value } : previous))
+  }
+
   function updateOrganizationCreate<K extends keyof OrganizationDraft>(key: K, value: OrganizationDraft[K]) {
     setOrganizationCreate((previous) => ({ ...previous, [key]: value }))
   }
@@ -1027,6 +1275,14 @@ function App() {
 
   function updateAppEdit<K extends keyof AppEditDraft>(key: K, value: AppEditDraft[K]) {
     setAppEdit((previous) => (previous ? { ...previous, [key]: value } : previous))
+  }
+
+  function updateAccessPolicyCreate<K extends keyof AppAccessPolicyDraft>(key: K, value: AppAccessPolicyDraft[K]) {
+    setAccessPolicyCreate((previous) => ({ ...previous, [key]: value }))
+  }
+
+  function updateAccessPolicyEdit<K extends keyof AppAccessPolicyDraft>(key: K, value: AppAccessPolicyDraft[K]) {
+    setAccessPolicyEdit((previous) => (previous ? { ...previous, [key]: value } : previous))
   }
 
   function updateProviderCreate<K extends keyof ProviderDraft>(key: K, value: ProviderDraft[K]) {
@@ -1198,6 +1454,91 @@ function App() {
     }, 'Failed to delete user.')
   }
 
+  async function handleCreateUserGroup(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    await runMutation(async () => {
+      const created = await requestJson<UserGroupItem>(requestContext, '/api/admin/user-groups', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: userGroupCreate.name.trim(),
+          description: trimToNull(userGroupCreate.description),
+        }),
+      })
+
+      setUserGroupCreate(createDefaultUserGroupDraft())
+      setSelectedUserGroupId(created.id)
+      setSuccess(`User group ${created.name} created.`)
+      await refreshAll()
+    }, 'Failed to create user group.')
+  }
+
+  async function handleSaveUserGroup(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!userGroupEdit || !selectedUserGroupId) {
+      return
+    }
+
+    await runMutation(async () => {
+      await requestJson<UserGroupItem>(requestContext, `/api/admin/user-groups/${encodeURIComponent(selectedUserGroupId)}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          name: userGroupEdit.name.trim(),
+          description: trimToNull(userGroupEdit.description),
+        }),
+      })
+
+      setSuccess(`User group ${userGroupEdit.name} updated.`)
+      await refreshAll()
+    }, 'Failed to update user group.')
+  }
+
+  async function handleDeleteUserGroup() {
+    if (!selectedUserGroupId || !userGroupEdit) {
+      return
+    }
+
+    if (!window.confirm(`Delete user group ${userGroupEdit.name}?`)) {
+      return
+    }
+
+    await runMutation(async () => {
+      await requestJson<unknown>(requestContext, `/api/admin/user-groups/${encodeURIComponent(selectedUserGroupId)}`, {
+        method: 'DELETE',
+      })
+
+      setSelectedUserGroupId(null)
+      setUserGroupEdit(null)
+      setUserGroupMembers([])
+      setUserGroupMemberIdsText('')
+      setSuccess(`User group ${userGroupEdit.name} deleted.`)
+      await refreshAll()
+    }, 'Failed to delete user group.')
+  }
+
+  async function handleSaveUserGroupMembers() {
+    if (!selectedUserGroupId) {
+      return
+    }
+
+    await runMutation(async () => {
+      const userIds = normalizeUserIdList(userGroupMemberIdsText)
+      await requestJson<unknown>(requestContext, `/api/admin/user-groups/${encodeURIComponent(selectedUserGroupId)}/members`, {
+        method: 'PUT',
+        body: JSON.stringify({ userIds }),
+      })
+
+      const members = await requestJson<UserGroupMemberItem[]>(
+        requestContext,
+        `/api/admin/user-groups/${encodeURIComponent(selectedUserGroupId)}/members`,
+      )
+      setUserGroupMembers(members)
+      setUserGroupMemberIdsText(members.map((member) => member.id).join('\n'))
+      setSuccess('User group members updated.')
+      await refreshAll()
+    }, 'Failed to update user group members.')
+  }
+
   async function handleCreateOrganization(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
 
@@ -1324,6 +1665,84 @@ function App() {
       setSuccess('App deleted.')
       await refreshAll()
     }, 'Failed to delete app.')
+  }
+
+  async function handleCreateAccessPolicy(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    if (!accessPolicyCreate.appId || !accessPolicyCreate.subjectId) {
+      setError('App and subject are required.')
+      return
+    }
+
+    await runMutation(async () => {
+      const created = await requestJson<AppAccessPolicyItem>(requestContext, '/api/admin/app-access-policies', {
+        method: 'POST',
+        body: JSON.stringify({
+          appId: accessPolicyCreate.appId,
+          subjectType: Number(accessPolicyCreate.subjectType),
+          subjectId: accessPolicyCreate.subjectId.trim(),
+          allowAccess: accessPolicyCreate.allowAccess,
+        }),
+      })
+
+      setSelectedAccessPolicyId(created.id)
+      setAccessPolicyCreate(createDefaultAppAccessPolicyDraft(apps[0]?.id ?? ''))
+      setSuccess('Access policy created.')
+      await refreshAll()
+    }, 'Failed to create access policy.')
+  }
+
+  async function handleSaveAccessPolicy(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!selectedAccessPolicyId || !accessPolicyEdit) {
+      return
+    }
+
+    if (!accessPolicyEdit.appId || !accessPolicyEdit.subjectId) {
+      setError('App and subject are required.')
+      return
+    }
+
+    await runMutation(async () => {
+      await requestJson<AppAccessPolicyItem>(
+        requestContext,
+        `/api/admin/app-access-policies/${encodeURIComponent(selectedAccessPolicyId)}`,
+        {
+          method: 'PUT',
+          body: JSON.stringify({
+            appId: accessPolicyEdit.appId,
+            subjectType: Number(accessPolicyEdit.subjectType),
+            subjectId: accessPolicyEdit.subjectId.trim(),
+            allowAccess: accessPolicyEdit.allowAccess,
+          }),
+        },
+      )
+
+      setSuccess('Access policy updated.')
+      await refreshAll()
+    }, 'Failed to update access policy.')
+  }
+
+  async function handleDeleteAccessPolicy() {
+    if (!selectedAccessPolicyId) {
+      return
+    }
+
+    if (!window.confirm('Delete selected access policy?')) {
+      return
+    }
+
+    await runMutation(async () => {
+      await requestJson<unknown>(requestContext, `/api/admin/app-access-policies/${encodeURIComponent(selectedAccessPolicyId)}`, {
+        method: 'DELETE',
+      })
+
+      setSelectedAccessPolicyId(null)
+      setAccessPolicyEdit(null)
+      setSuccess('Access policy deleted.')
+      await refreshAll()
+    }, 'Failed to delete access policy.')
   }
 
   async function handleCreateProvider(event: FormEvent<HTMLFormElement>) {
@@ -2073,6 +2492,152 @@ function App() {
           </div>
         )}
 
+        {activeTab === 'userGroups' && (
+          <div className="panel">
+            <h2>User Groups</h2>
+            <p className="section-hint">Manage user group metadata and member assignments.</p>
+
+            <form onSubmit={handleCreateUserGroup} className="config-form create-section">
+              <h3>Create User Group</h3>
+              <div className="inline-form">
+                <input
+                  placeholder="Group Name"
+                  value={userGroupCreate.name}
+                  onChange={(event) => updateUserGroupCreate('name', event.target.value)}
+                  required
+                />
+                <input
+                  placeholder="Description (optional)"
+                  value={userGroupCreate.description}
+                  onChange={(event) => updateUserGroupCreate('description', event.target.value)}
+                />
+                <button type="submit">Create</button>
+              </div>
+            </form>
+
+            <div className="detail-layout">
+              <section className="list-panel">
+                <h3>Group List</h3>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Description</th>
+                      <th>Members</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {userGroups.length === 0 && (
+                      <tr>
+                        <td colSpan={3} className="empty-cell">
+                          No user groups found.
+                        </td>
+                      </tr>
+                    )}
+                    {userGroups.map((group) => (
+                      <tr
+                        key={group.id}
+                        className={`clickable-row ${selectedUserGroupId === group.id ? 'active-row' : ''}`}
+                        onClick={() => setSelectedUserGroupId(group.id)}
+                      >
+                        <td>{group.name}</td>
+                        <td>{optionOrDash(group.description)}</td>
+                        <td>{group.memberCount}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </section>
+
+              <section className="detail-panel">
+                <h3>Group Detail</h3>
+                {!userGroupEdit && <p className="empty-hint">Select a group to edit metadata and members.</p>}
+                {userGroupEdit && (
+                  <form onSubmit={handleSaveUserGroup} className="config-form">
+                    <div className="inline-form">
+                      <input
+                        placeholder="Group Name"
+                        value={userGroupEdit.name}
+                        onChange={(event) => updateUserGroupEdit('name', event.target.value)}
+                        required
+                      />
+                      <input
+                        placeholder="Description (optional)"
+                        value={userGroupEdit.description}
+                        onChange={(event) => updateUserGroupEdit('description', event.target.value)}
+                      />
+                    </div>
+                    <div className="action-row">
+                      <button type="submit">Save Group</button>
+                      <button
+                        type="button"
+                        className="secondary-btn"
+                        onClick={() => {
+                          const target = userGroups.find((group) => group.id === selectedUserGroupId)
+                          if (target) {
+                            setUserGroupEdit(userGroupDraftFromEntity(target))
+                          }
+                        }}
+                      >
+                        Reset
+                      </button>
+                      <button type="button" className="danger-btn" onClick={() => void handleDeleteUserGroup()}>
+                        Delete
+                      </button>
+                    </div>
+
+                    <label className="field-label" htmlFor="group-member-ids">
+                      Member User IDs (split by newline/comma/semicolon)
+                    </label>
+                    <textarea
+                      id="group-member-ids"
+                      className="json-editor"
+                      rows={5}
+                      value={userGroupMemberIdsText}
+                      onChange={(event) => setUserGroupMemberIdsText(event.target.value)}
+                    />
+
+                    <div className="action-row">
+                      <button type="button" className="info-btn" onClick={() => void handleSaveUserGroupMembers()}>
+                        Save Members
+                      </button>
+                    </div>
+
+                    <h3 className="nested-title">Resolved Members</h3>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>User ID</th>
+                          <th>Username</th>
+                          <th>Display Name</th>
+                          <th>Email</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {userGroupMembers.length === 0 && (
+                          <tr>
+                            <td colSpan={4} className="empty-cell">
+                              No resolved members.
+                            </td>
+                          </tr>
+                        )}
+                        {userGroupMembers.map((member) => (
+                          <tr key={member.id}>
+                            <td>{member.id}</td>
+                            <td>{member.userName}</td>
+                            <td>{member.displayName}</td>
+                            <td>{optionOrDash(member.email)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </form>
+                )}
+              </section>
+            </div>
+          </div>
+        )}
+
         {activeTab === 'organizations' && (
           <div className="panel">
             <h2>Organizations</h2>
@@ -2305,6 +2870,198 @@ function App() {
                         Reset
                       </button>
                       <button type="button" className="danger-btn" onClick={() => void handleDeleteApp()}>
+                        Delete
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </section>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'accessPolicies' && (
+          <div className="panel">
+            <h2>App Access Policies</h2>
+            <p className="section-hint">Control user/group/organization access per application.</p>
+
+            <form onSubmit={handleCreateAccessPolicy} className="config-form create-section">
+              <h3>Create Access Policy</h3>
+              <div className="inline-form">
+                <select
+                  value={accessPolicyCreate.appId}
+                  onChange={(event) => updateAccessPolicyCreate('appId', event.target.value)}
+                  required
+                >
+                  <option value="">Select app</option>
+                  {apps.map((app) => (
+                    <option key={app.id} value={app.id}>
+                      {app.code} ({app.name})
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={accessPolicyCreate.subjectType}
+                  onChange={(event) => {
+                    const subjectType = event.target.value as SubjectTypeValue
+                    const fallbackSubjectId =
+                      subjectType === '2'
+                        ? userGroups[0]?.id ?? ''
+                        : subjectType === '3'
+                          ? organizations[0]?.id ?? ''
+                          : users[0]?.id ?? ''
+                    setAccessPolicyCreate((previous) => ({
+                      ...previous,
+                      subjectType,
+                      subjectId: fallbackSubjectId,
+                    }))
+                  }}
+                >
+                  <option value="1">User</option>
+                  <option value="2">Group</option>
+                  <option value="3">Organization</option>
+                </select>
+                <select
+                  value={accessPolicyCreate.subjectId}
+                  onChange={(event) => updateAccessPolicyCreate('subjectId', event.target.value)}
+                  required
+                >
+                  <option value="">Select subject</option>
+                  {createSubjectOptions.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <label className="checkbox-row">
+                  <input
+                    type="checkbox"
+                    checked={accessPolicyCreate.allowAccess}
+                    onChange={(event) => updateAccessPolicyCreate('allowAccess', event.target.checked)}
+                  />
+                  Allow Access
+                </label>
+                <button type="submit">Create</button>
+              </div>
+            </form>
+
+            <div className="detail-layout">
+              <section className="list-panel">
+                <h3>Policy List</h3>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>App</th>
+                      <th>Subject</th>
+                      <th>Subject Name</th>
+                      <th>Allowed</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {appAccessPolicies.length === 0 && (
+                      <tr>
+                        <td colSpan={4} className="empty-cell">
+                          No app access policies found.
+                        </td>
+                      </tr>
+                    )}
+                    {appAccessPolicies.map((policy) => (
+                      <tr
+                        key={policy.id}
+                        className={`clickable-row ${selectedAccessPolicyId === policy.id ? 'active-row' : ''}`}
+                        onClick={() => setSelectedAccessPolicyId(policy.id)}
+                      >
+                        <td>{policy.appCode ? `${policy.appCode} (${policy.appName ?? '-'})` : policy.appId}</td>
+                        <td>
+                          {toSubjectTypeLabel(policy.subjectType)} / {policy.subjectId}
+                        </td>
+                        <td>{optionOrDash(policy.subjectName)}</td>
+                        <td>{policy.allowAccess ? 'Yes' : 'No'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </section>
+
+              <section className="detail-panel">
+                <h3>Policy Detail</h3>
+                {!accessPolicyEdit && <p className="empty-hint">Select a policy to edit.</p>}
+                {accessPolicyEdit && (
+                  <form onSubmit={handleSaveAccessPolicy} className="config-form">
+                    <div className="inline-form">
+                      <select
+                        value={accessPolicyEdit.appId}
+                        onChange={(event) => updateAccessPolicyEdit('appId', event.target.value)}
+                        required
+                      >
+                        <option value="">Select app</option>
+                        {apps.map((app) => (
+                          <option key={app.id} value={app.id}>
+                            {app.code} ({app.name})
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        value={accessPolicyEdit.subjectType}
+                        onChange={(event) => {
+                          const subjectType = event.target.value as SubjectTypeValue
+                          const fallbackSubjectId =
+                            subjectType === '2'
+                              ? userGroups[0]?.id ?? ''
+                              : subjectType === '3'
+                                ? organizations[0]?.id ?? ''
+                                : users[0]?.id ?? ''
+                          setAccessPolicyEdit((previous) =>
+                            previous
+                              ? {
+                                  ...previous,
+                                  subjectType,
+                                  subjectId: fallbackSubjectId,
+                                }
+                              : previous,
+                          )
+                        }}
+                      >
+                        <option value="1">User</option>
+                        <option value="2">Group</option>
+                        <option value="3">Organization</option>
+                      </select>
+                      <select
+                        value={accessPolicyEdit.subjectId}
+                        onChange={(event) => updateAccessPolicyEdit('subjectId', event.target.value)}
+                        required
+                      >
+                        <option value="">Select subject</option>
+                        {editSubjectOptions.map((option) => (
+                          <option key={option.id} value={option.id}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                      <label className="checkbox-row">
+                        <input
+                          type="checkbox"
+                          checked={accessPolicyEdit.allowAccess}
+                          onChange={(event) => updateAccessPolicyEdit('allowAccess', event.target.checked)}
+                        />
+                        Allow Access
+                      </label>
+                    </div>
+                    <div className="action-row">
+                      <button type="submit">Save Changes</button>
+                      <button
+                        type="button"
+                        className="secondary-btn"
+                        onClick={() => {
+                          const target = appAccessPolicies.find((policy) => policy.id === selectedAccessPolicyId)
+                          if (target) {
+                            setAccessPolicyEdit(appAccessPolicyDraftFromEntity(target))
+                          }
+                        }}
+                      >
+                        Reset
+                      </button>
+                      <button type="button" className="danger-btn" onClick={() => void handleDeleteAccessPolicy()}>
                         Delete
                       </button>
                     </div>

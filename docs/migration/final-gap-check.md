@@ -36,9 +36,13 @@
 - `dotnet build src/NetIAM.sln` passes
 - `npm run build` passes for `web/admin` and `web/portal`
 - admin closure milestone delivered:
-  - `web/admin` now covers tenant/user/organization/app/provider/source/rbac/saml/scim/audit tabs
+  - `web/admin` now covers tenant/user/user-group/organization/app/access-policy/provider/source/rbac/saml/scim/audit tabs
   - request context supports `X-Tenant-Id` + `X-Acting-User-Id` + optional bearer token
   - users upgraded from read-only to full CRUD UX
+- phase2 admin modules delivered:
+  - admin user-group APIs (`/api/admin/user-groups`) with member replacement
+  - admin app-access-policy APIs (`/api/admin/app-access-policies`) with subject validation
+  - admin UI wiring for user-group and app-access-policy management
 - admin backend minimal CRUD gaps closed:
   - tenants support update/delete
   - organizations support update/delete with tree-path rebuild and child-delete guard
@@ -53,7 +57,6 @@
 ## Remaining Gaps for Next Iteration
 
 - admin modules not yet aligned to eiam console breadth:
-  - user-group management and app-access-policy management
   - security settings (password policy / defense policy / administrator management)
   - monitor/session management and system setting modules (message/geoip/storage)
 - identity source sync history/record query APIs and admin UI
