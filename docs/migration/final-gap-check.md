@@ -54,6 +54,15 @@
   - admin source tab now visualizes sync histories and record details with history filtering
   - RBAC user-role binding APIs (`/api/admin/rbac/users/{userId}/roles`) and UI operations
   - RBAC user grant revoke APIs (`DELETE /api/admin/rbac/users/{userId}/grants/{permissionCode}`) and UI operations
+- phase5 hardening modules delivered:
+  - monitor hard-logout guard (`X-Session-Id`/`sid`) + session revocation middleware in admin/portal/auth services
+  - session termination service wired to OpenIddict token/authorization revoke path
+  - auth callback/local login now emit stable `sessionId`; admin request context now supports `X-Session-Id`
+  - SAML assertion signing + optional encryption (`SigningCertificatePem`) + metadata signing key publication
+  - SAML IdP signing certificate auto-generation and rollover automation via system settings
+  - SCIM users/groups PATCH semantics enhanced (`add`/`replace`/`remove`, filtered member removal) and `/scim/v2/Bulk` endpoint added
+  - provider outbound governance: retry/backoff (429/5xx), retry-after handling, and base rate throttling
+  - contract/e2e test suites added (`tests/NetIAM.Integrations.ContractTests`, `tests/NetIAM.E2E.Tests`) with env-gated sandbox credentials
 - admin backend minimal CRUD gaps closed:
   - tenants support update/delete
   - organizations support update/delete with tree-path rebuild and child-delete guard
@@ -68,9 +77,6 @@
 
 ## Remaining Gaps for Next Iteration
 
-- admin modules not yet aligned to eiam console breadth:
-  - monitor session force-logout is currently a revocation marker (not yet protocol-level hard logout)
-- SAML assertion signing/encryption and metadata certificate rollover automation
-- SCIM PATCH filter semantics and bulk endpoint support
-- provider sandbox contract tests + retry/backoff + rate-limit governance
-- full end-to-end automated integration test suite with real provider sandbox credentials
+- OIDC/SAML end-session protocol completeness (front-channel logout handshake and full SLO interop).
+- RBAC permission bulk policy templates/operations.
+- CI pipeline integration for sandbox contract/e2e suites with managed secret rotation.

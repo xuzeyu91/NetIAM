@@ -1,5 +1,4 @@
 using System.Net.Http.Headers;
-using System.Net.Http.Json;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using NetIAM.Domain.Contracts;
@@ -52,7 +51,8 @@ public sealed class DingTalkAuthProviderHandler(HttpClient httpClient) : IExtern
             grantType = "authorization_code"
         };
 
-        using var response = await httpClient.PostAsJsonAsync(
+        using var response = await httpClient.PostJsonAsyncWithGovernance(
+            "dingtalk-auth",
             "https://api.dingtalk.com/v1.0/oauth2/userAccessToken",
             payload,
             cancellationToken);
@@ -70,10 +70,15 @@ public sealed class DingTalkAuthProviderHandler(HttpClient httpClient) : IExtern
         ExternalUserAccessToken accessToken,
         CancellationToken cancellationToken = default)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, "https://api.dingtalk.com/v1.0/contact/users/me");
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken.AccessToken);
-
-        using var response = await httpClient.SendAsync(request, cancellationToken);
+        using var response = await httpClient.SendAsyncWithGovernance(
+            "dingtalk-auth",
+            () =>
+            {
+                var governedRequest = new HttpRequestMessage(HttpMethod.Get, "https://api.dingtalk.com/v1.0/contact/users/me");
+                governedRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken.AccessToken);
+                return governedRequest;
+            },
+            cancellationToken);
         response.EnsureSuccessStatusCode();
 
         var rawJson = await response.Content.ReadAsStringAsync(cancellationToken);

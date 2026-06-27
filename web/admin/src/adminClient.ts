@@ -3,6 +3,7 @@ export type RequestContext = {
   portalBase: string
   tenantId: string
   actingUserId: string
+  sessionId: string
   bearerToken: string
 }
 
@@ -23,6 +24,7 @@ function normalizeContext(value: Partial<RequestContext>, fallback: RequestConte
     portalBase: normalizeBaseUrl(value.portalBase ?? fallback.portalBase, fallback.portalBase),
     tenantId: value.tenantId?.trim() || fallback.tenantId,
     actingUserId: value.actingUserId?.trim() || fallback.actingUserId,
+    sessionId: value.sessionId?.trim() ?? fallback.sessionId,
     bearerToken: value.bearerToken?.trim() ?? fallback.bearerToken,
   }
 }
@@ -33,6 +35,7 @@ export function createDefaultRequestContext(): RequestContext {
     portalBase: normalizeBaseUrl(DEFAULT_PORTAL_BASE, 'https://localhost:7003'),
     tenantId: DEFAULT_TENANT_ID,
     actingUserId: DEFAULT_ACTING_USER_ID,
+    sessionId: '',
     bearerToken: '',
   }
 }
@@ -83,6 +86,11 @@ export async function requestJson<T>(context: RequestContext, path: string, opti
   const actingUserId = context.actingUserId.trim()
   if (actingUserId) {
     headers.set('X-Acting-User-Id', actingUserId)
+  }
+
+  const sessionId = context.sessionId.trim()
+  if (sessionId) {
+    headers.set('X-Session-Id', sessionId)
   }
 
   const token = context.bearerToken.trim()

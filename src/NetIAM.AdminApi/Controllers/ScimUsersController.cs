@@ -25,7 +25,7 @@ public sealed class ScimUsersController(UserManager<NetIamIdentityUser> userMana
         IReadOnlyCollection<ScimUserEmail>? Emails,
         IReadOnlyCollection<ScimPhoneNumber>? PhoneNumbers);
 
-    public sealed record ScimPatchRequest(IReadOnlyCollection<ScimPatchOperation> Operations);
+    public sealed record ScimPatchRequest(IReadOnlyCollection<ScimPatchOperation>? Operations);
     public sealed record ScimPatchOperation(string Op, string? Path, JsonElement Value);
 
     [HttpGet]
@@ -142,36 +142,56 @@ public sealed class ScimUsersController(UserManager<NetIamIdentityUser> userMana
             return NotFound();
         }
 
-        foreach (var operation in request.Operations)
+        var operations = request.Operations ?? Array.Empty<ScimPatchOperation>();
+        foreach (var operation in operations)
         {
-            if (!string.Equals(operation.Op, "replace", StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(operation.Op, "add", StringComparison.OrdinalIgnoreCase))
+            var op = operation.Op?.Trim().ToLowerInvariant() ?? string.Empty;
+            if (op is not ("replace" or "add" or "remove"))
             {
                 continue;
             }
 
-            var path = operation.Path?.ToLowerInvariant() ?? string.Empty;
-            if (path is "displayname")
+            var path = operation.Path?.Trim().ToLowerInvariant() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(path) && operation.Value.ValueKind == JsonValueKind.Object)
             {
-                user.DisplayName = operation.Value.GetString() ?? user.DisplayName;
+                ApplyPatchObject(user, op, operation.Value);
+            }
+            else if (path is "displayname" or "name.formatted")
+            {
+                if (op == "remove")
+                {
+                    user.DisplayName = user.UserName ?? user.DisplayName;
+                }
+                else
+                {
+                    user.DisplayName = ExtractScalarString(operation.Value) ?? user.DisplayName;
+                }
+            }
+            else if (path is "username")
+            {
+                if (op != "remove")
+                {
+                    user.UserName = ExtractScalarString(operation.Value) ?? user.UserName;
+                }
             }
             else if (path is "active")
             {
-                user.IsDeleted = !(operation.Value.GetBoolean());
-            }
-            else if (path.StartsWith("emails"))
-            {
-                if (operation.Value.ValueKind == JsonValueKind.Array)
+                if (op == "remove")
                 {
-                    user.Email = ExtractFirstArrayValue(operation.Value) ?? user.Email;
+                    user.IsDeleted = false;
+                }
+                else
+                {
+                    user.IsDeleted = !ExtractBoolean(operation.Value, fallback: true);
                 }
             }
-            else if (path.StartsWith("phonenumbers"))
+            else if (path.StartsWith("emails", StringComparison.Ordinal))
             {
-                if (operation.Value.ValueKind == JsonValueKind.Array)
-                {
-                    user.PhoneNumber = ExtractFirstArrayValue(operation.Value) ?? user.PhoneNumber;
-                }
+                ApplyEmailPatch(user, op, path, operation.Value);
+            }
+            else if (path.StartsWith("phonenumbers", StringComparison.Ordinal))
+            {
+                ApplyPhonePatch(user, op, path, operation.Value);
             }
         }
 
@@ -220,6 +240,17 @@ public sealed class ScimUsersController(UserManager<NetIamIdentityUser> userMana
         }
 
         var normalized = filter.Trim();
+        var andParts = normalized.Split(" and ", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (andParts.Length > 1)
+        {
+            foreach (var andPart in andParts)
+            {
+                query = ApplyFilter(query, andPart);
+            }
+
+            return query;
+        }
+
         if (normalized.StartsWith("userName eq ", StringComparison.OrdinalIgnoreCase))
         {
             var value = ExtractFilterValue(normalized["userName eq ".Length..]);
@@ -230,6 +261,25 @@ public sealed class ScimUsersController(UserManager<NetIamIdentityUser> userMana
         {
             var value = ExtractFilterValue(normalized["id eq ".Length..]);
             return query.Where(x => x.Id == value);
+        }
+
+        if (normalized.StartsWith("displayName eq ", StringComparison.OrdinalIgnoreCase))
+        {
+            var value = ExtractFilterValue(normalized["displayName eq ".Length..]);
+            return query.Where(x => x.DisplayName == value);
+        }
+
+        if (normalized.StartsWith("active eq ", StringComparison.OrdinalIgnoreCase))
+        {
+            var value = ExtractFilterValue(normalized["active eq ".Length..]);
+            var active = string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
+            return active ? query.Where(x => !x.IsDeleted) : query.Where(x => x.IsDeleted);
+        }
+
+        if (normalized.StartsWith("emails.value eq ", StringComparison.OrdinalIgnoreCase))
+        {
+            var value = ExtractFilterValue(normalized["emails.value eq ".Length..]);
+            return query.Where(x => x.Email == value);
         }
 
         return query;
@@ -243,6 +293,173 @@ public sealed class ScimUsersController(UserManager<NetIamIdentityUser> userMana
     private static string? ExtractFirstArrayValue(JsonElement element)
     {
         var first = element.EnumerateArray().FirstOrDefault();
+        if (first.ValueKind == JsonValueKind.String)
+        {
+            return first.GetString();
+        }
+
         return first.TryGetProperty("value", out var property) ? property.GetString() : null;
+    }
+
+    private static void ApplyPatchObject(NetIamIdentityUser user, string op, JsonElement value)
+    {
+        if (op == "remove")
+        {
+            return;
+        }
+
+        if (value.TryGetProperty("displayName", out var displayName))
+        {
+            user.DisplayName = ExtractScalarString(displayName) ?? user.DisplayName;
+        }
+
+        if (value.TryGetProperty("userName", out var userName))
+        {
+            user.UserName = ExtractScalarString(userName) ?? user.UserName;
+        }
+
+        if (value.TryGetProperty("active", out var active))
+        {
+            user.IsDeleted = !ExtractBoolean(active, fallback: true);
+        }
+
+        if (value.TryGetProperty("emails", out var emails))
+        {
+            ApplyEmailPatch(user, op, "emails", emails);
+        }
+
+        if (value.TryGetProperty("phoneNumbers", out var phoneNumbers))
+        {
+            ApplyPhonePatch(user, op, "phonenumbers", phoneNumbers);
+        }
+
+        if (value.TryGetProperty("name", out var nameNode)
+            && nameNode.ValueKind == JsonValueKind.Object
+            && nameNode.TryGetProperty("formatted", out var formatted))
+        {
+            user.DisplayName = ExtractScalarString(formatted) ?? user.DisplayName;
+        }
+    }
+
+    private static void ApplyEmailPatch(NetIamIdentityUser user, string op, string path, JsonElement value)
+    {
+        if (op == "remove")
+        {
+            if (!ShouldApplyFilteredRemove(path, user.Email))
+            {
+                return;
+            }
+
+            user.Email = null;
+            return;
+        }
+
+        var email = ExtractEmailValue(value);
+        if (!string.IsNullOrWhiteSpace(email))
+        {
+            user.Email = email;
+        }
+    }
+
+    private static void ApplyPhonePatch(NetIamIdentityUser user, string op, string path, JsonElement value)
+    {
+        if (op == "remove")
+        {
+            if (!ShouldApplyFilteredRemove(path, user.PhoneNumber))
+            {
+                return;
+            }
+
+            user.PhoneNumber = null;
+            return;
+        }
+
+        var phone = ExtractPhoneValue(value);
+        if (!string.IsNullOrWhiteSpace(phone))
+        {
+            user.PhoneNumber = phone;
+        }
+    }
+
+    private static string? ExtractEmailValue(JsonElement value)
+    {
+        if (value.ValueKind == JsonValueKind.String)
+        {
+            return value.GetString();
+        }
+
+        if (value.ValueKind == JsonValueKind.Object)
+        {
+            if (value.TryGetProperty("value", out var directValue))
+            {
+                return directValue.GetString();
+            }
+
+            return null;
+        }
+
+        if (value.ValueKind == JsonValueKind.Array)
+        {
+            return ExtractFirstArrayValue(value);
+        }
+
+        return null;
+    }
+
+    private static string? ExtractPhoneValue(JsonElement value)
+    {
+        return ExtractEmailValue(value);
+    }
+
+    private static string? ExtractScalarString(JsonElement value)
+    {
+        return value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+    }
+
+    private static bool ExtractBoolean(JsonElement value, bool fallback)
+    {
+        return value.ValueKind switch
+        {
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.String when bool.TryParse(value.GetString(), out var parsed) => parsed,
+            _ => fallback
+        };
+    }
+
+    private static bool ShouldApplyFilteredRemove(string path, string? currentValue)
+    {
+        var normalized = path.Trim().ToLowerInvariant();
+        if (!normalized.Contains("[", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        var start = normalized.IndexOf('[', StringComparison.Ordinal);
+        var end = normalized.IndexOf(']', StringComparison.Ordinal);
+        if (start < 0 || end <= start)
+        {
+            return true;
+        }
+
+        var condition = normalized.Substring(start + 1, end - start - 1).Trim();
+        var tokens = condition.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (tokens.Length != 3 || !string.Equals(tokens[1], "eq", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        var value = tokens[2].Trim('"');
+        if (string.Equals(tokens[0], "value", StringComparison.Ordinal))
+        {
+            return string.Equals(currentValue, value, StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (string.Equals(tokens[0], "type", StringComparison.Ordinal))
+        {
+            return string.Equals(value, "work", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return true;
     }
 }

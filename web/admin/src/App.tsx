@@ -2755,7 +2755,8 @@ function App() {
         <section className="context-panel">
           <h2>Request Context</h2>
           <p className="section-hint">
-            Every request sends <code>X-Tenant-Id</code>, optional <code>X-Acting-User-Id</code>, and optional{' '}
+            Every request sends <code>X-Tenant-Id</code>, optional <code>X-Acting-User-Id</code>, optional{' '}
+            <code>X-Session-Id</code>, and optional{' '}
             <code>Authorization: Bearer</code> token.
           </p>
           <div className="field-grid">
@@ -2789,6 +2790,14 @@ function App() {
                 value={requestContext.actingUserId}
                 onChange={(event) => updateRequestContextField('actingUserId', event.target.value)}
                 placeholder="user-admin-default"
+              />
+            </label>
+            <label className="field-block span-2">
+              <span>Session Id (optional, enables hard-logout guard)</span>
+              <input
+                value={requestContext.sessionId}
+                onChange={(event) => updateRequestContextField('sessionId', event.target.value)}
+                placeholder="Paste session id returned by login APIs"
               />
             </label>
             <label className="field-block span-2">

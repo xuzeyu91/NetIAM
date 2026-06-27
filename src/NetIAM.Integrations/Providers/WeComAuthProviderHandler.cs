@@ -45,7 +45,8 @@ public sealed class WeComAuthProviderHandler(HttpClient httpClient, IMemoryCache
 
         var corpToken = await GetCorpTokenAsync(corpId, appSecret, cancellationToken);
 
-        using var userInfoResponse = await httpClient.GetAsync(
+        using var userInfoResponse = await httpClient.GetAsyncWithGovernance(
+            "wecom-auth",
             $"{UserInfoApi}?access_token={Uri.EscapeDataString(corpToken)}&code={Uri.EscapeDataString(callback.AuthorizationCode)}",
             cancellationToken);
         userInfoResponse.EnsureSuccessStatusCode();
@@ -82,7 +83,8 @@ public sealed class WeComAuthProviderHandler(HttpClient httpClient, IMemoryCache
 
         if (!string.IsNullOrWhiteSpace(payload.UserId))
         {
-            using var response = await httpClient.GetAsync(
+            using var response = await httpClient.GetAsyncWithGovernance(
+                "wecom-auth",
                 $"{UserDetailApi}?access_token={Uri.EscapeDataString(payload.CorpToken)}&userid={Uri.EscapeDataString(payload.UserId)}",
                 cancellationToken);
             response.EnsureSuccessStatusCode();
@@ -112,7 +114,8 @@ public sealed class WeComAuthProviderHandler(HttpClient httpClient, IMemoryCache
             cacheKey,
             async entry =>
             {
-                using var tokenResponse = await httpClient.GetAsync(
+                using var tokenResponse = await httpClient.GetAsyncWithGovernance(
+                    "wecom-auth",
                     $"{TokenApi}?corpid={Uri.EscapeDataString(corpId)}&corpsecret={Uri.EscapeDataString(appSecret)}",
                     cancellationToken);
                 tokenResponse.EnsureSuccessStatusCode();

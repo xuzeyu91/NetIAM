@@ -11,12 +11,12 @@ public static class IntegrationServiceCollectionExtensions
     {
         services.AddMemoryCache();
 
-        services.AddHttpClient<DingTalkAuthProviderHandler>();
-        services.AddHttpClient<FeishuAuthProviderHandler>();
-        services.AddHttpClient<WeComAuthProviderHandler>();
-        services.AddHttpClient<DingTalkDirectorySyncProvider>();
-        services.AddHttpClient<FeishuDirectorySyncProvider>();
-        services.AddHttpClient<WeComDirectorySyncProvider>();
+        services.AddHttpClient<DingTalkAuthProviderHandler>(ConfigureProviderHttpClient);
+        services.AddHttpClient<FeishuAuthProviderHandler>(ConfigureProviderHttpClient);
+        services.AddHttpClient<WeComAuthProviderHandler>(ConfigureProviderHttpClient);
+        services.AddHttpClient<DingTalkDirectorySyncProvider>(ConfigureProviderHttpClient);
+        services.AddHttpClient<FeishuDirectorySyncProvider>(ConfigureProviderHttpClient);
+        services.AddHttpClient<WeComDirectorySyncProvider>(ConfigureProviderHttpClient);
 
         services.AddScoped<IExternalAuthProviderHandler>(sp => sp.GetRequiredService<DingTalkAuthProviderHandler>());
         services.AddScoped<IExternalAuthProviderHandler>(sp => sp.GetRequiredService<FeishuAuthProviderHandler>());
@@ -29,5 +29,11 @@ public static class IntegrationServiceCollectionExtensions
         services.AddScoped<IDirectorySyncProviderFactory, DirectorySyncProviderFactory>();
 
         return services;
+    }
+
+    private static void ConfigureProviderHttpClient(IServiceProvider _, HttpClient httpClient)
+    {
+        httpClient.Timeout = TimeSpan.FromSeconds(30);
+        httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("NetIAM-Integrations/1.0");
     }
 }

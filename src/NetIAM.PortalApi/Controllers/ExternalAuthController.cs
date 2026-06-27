@@ -104,12 +104,19 @@ public sealed class ExternalAuthController(
             profile,
             cancellationToken);
 
+        var sessionId = Guid.NewGuid().ToString("N");
         await auditService.WriteAsync(
             new AuditWriteRequest(
                 tenantId,
                 "portal.idp.login.callback",
                 $"Provider {provider}/{code} login callback processed.",
-                TargetJson: profile.RawProfileJson),
+                ActorType: "user",
+                ActorId: bindResult.UserId,
+                TargetJson: profile.RawProfileJson,
+                RequestId: HttpContext.TraceIdentifier,
+                SessionId: sessionId,
+                UserAgent: Request.Headers.UserAgent.ToString(),
+                IpAddress: HttpContext.Connection.RemoteIpAddress?.ToString()),
             cancellationToken);
 
         if (bindResult.Status == AccountBindingStatus.PendingBinding)
@@ -118,6 +125,7 @@ public sealed class ExternalAuthController(
             {
                 status = "pending_binding",
                 bindResult.ThirdPartyUserId,
+                sessionId,
                 hint = "Use POST /login/bind to bind an existing account."
             });
         }
@@ -126,7 +134,8 @@ public sealed class ExternalAuthController(
         {
             status = bindResult.Status.ToString().ToLowerInvariant(),
             bindResult.UserId,
-            bindResult.ThirdPartyUserId
+            bindResult.ThirdPartyUserId,
+            sessionId
         });
     }
 

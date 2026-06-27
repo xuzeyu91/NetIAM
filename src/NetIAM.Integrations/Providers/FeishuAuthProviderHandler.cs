@@ -1,5 +1,4 @@
 using System.Net.Http.Headers;
-using System.Net.Http.Json;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using NetIAM.Domain.Contracts;
@@ -57,9 +56,12 @@ public sealed class FeishuAuthProviderHandler(HttpClient httpClient) : IExternal
             payload["redirect_uri"] = redirectUri;
         }
 
-        using var response = await httpClient.PostAsync(
-            "https://passport.feishu.cn/suite/passport/oauth/token",
-            new FormUrlEncodedContent(payload),
+        using var response = await httpClient.SendAsyncWithGovernance(
+            "feishu-auth",
+            () => new HttpRequestMessage(HttpMethod.Post, "https://passport.feishu.cn/suite/passport/oauth/token")
+            {
+                Content = new FormUrlEncodedContent(payload)
+            },
             cancellationToken);
         response.EnsureSuccessStatusCode();
 
@@ -75,9 +77,15 @@ public sealed class FeishuAuthProviderHandler(HttpClient httpClient) : IExternal
         ExternalUserAccessToken accessToken,
         CancellationToken cancellationToken = default)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, "https://passport.feishu.cn/suite/passport/oauth/userinfo");
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken.AccessToken);
-        using var response = await httpClient.SendAsync(request, cancellationToken);
+        using var response = await httpClient.SendAsyncWithGovernance(
+            "feishu-auth",
+            () =>
+            {
+                var request = new HttpRequestMessage(HttpMethod.Get, "https://passport.feishu.cn/suite/passport/oauth/userinfo");
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken.AccessToken);
+                return request;
+            },
+            cancellationToken);
         response.EnsureSuccessStatusCode();
 
         var rawJson = await response.Content.ReadAsStringAsync(cancellationToken);

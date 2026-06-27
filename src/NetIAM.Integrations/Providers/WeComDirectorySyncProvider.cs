@@ -25,7 +25,8 @@ public sealed class WeComDirectorySyncProvider(HttpClient httpClient) : IDirecto
         var appSecret = ProviderConfigParser.RequiredStringAny(config, "appSecret", "corpSecret");
         var token = await GetAccessTokenAsync(corpId, appSecret, cancellationToken);
 
-        using var response = await httpClient.GetAsync(
+        using var response = await httpClient.GetAsyncWithGovernance(
+            "wecom-sync",
             $"https://qyapi.weixin.qq.com/cgi-bin/department/list?access_token={Uri.EscapeDataString(token)}",
             cancellationToken);
         response.EnsureSuccessStatusCode();
@@ -73,7 +74,8 @@ public sealed class WeComDirectorySyncProvider(HttpClient httpClient) : IDirecto
 
         foreach (var organization in organizations)
         {
-            using var response = await httpClient.GetAsync(
+            using var response = await httpClient.GetAsyncWithGovernance(
+                "wecom-sync",
                 $"https://qyapi.weixin.qq.com/cgi-bin/user/simplelist?access_token={Uri.EscapeDataString(token)}&department_id={Uri.EscapeDataString(organization.ExternalId)}&fetch_child=0",
                 cancellationToken);
             response.EnsureSuccessStatusCode();
@@ -100,7 +102,8 @@ public sealed class WeComDirectorySyncProvider(HttpClient httpClient) : IDirecto
 
                 if (fetchUserDetail)
                 {
-                    using var userDetailResponse = await httpClient.GetAsync(
+                    using var userDetailResponse = await httpClient.GetAsyncWithGovernance(
+                        "wecom-sync",
                         $"https://qyapi.weixin.qq.com/cgi-bin/user/get?access_token={Uri.EscapeDataString(token)}&userid={Uri.EscapeDataString(userId)}",
                         cancellationToken);
                     userDetailResponse.EnsureSuccessStatusCode();
@@ -142,7 +145,8 @@ public sealed class WeComDirectorySyncProvider(HttpClient httpClient) : IDirecto
 
     private async Task<string> GetAccessTokenAsync(string corpId, string appSecret, CancellationToken cancellationToken)
     {
-        using var response = await httpClient.GetAsync(
+        using var response = await httpClient.GetAsyncWithGovernance(
+            "wecom-sync",
             $"https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid={Uri.EscapeDataString(corpId)}&corpsecret={Uri.EscapeDataString(appSecret)}",
             cancellationToken);
         response.EnsureSuccessStatusCode();

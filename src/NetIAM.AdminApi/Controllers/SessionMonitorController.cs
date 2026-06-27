@@ -11,25 +11,18 @@ namespace NetIAM.AdminApi.Controllers;
 public sealed class SessionMonitorController(
     NetIamDbContext dbContext,
     ITenantContextAccessor tenantContextAccessor,
-    ISystemSettingStore systemSettingStore,
+    ISessionRevocationService sessionRevocationService,
+    ISessionTerminationService sessionTerminationService,
     IAuditService auditService) : ControllerBase
 {
-    private const string RevokedSessionSettingKey = "monitor.revoked-sessions";
-
-    public sealed record RevokedSessionRegistry(IReadOnlyCollection<string> SessionIds);
-
     [HttpGet]
     [RequirePermission("monitor.read")]
     public async Task<IActionResult> List([FromQuery] int take = 100, CancellationToken cancellationToken = default)
     {
         var tenantId = tenantContextAccessor.GetTenantId();
         var normalizedTake = Math.Clamp(take, 1, 500);
-        var revoked = await systemSettingStore.GetAsync(
-            tenantId,
-            RevokedSessionSettingKey,
-            new RevokedSessionRegistry(Array.Empty<string>()),
-            cancellationToken);
-        var revokedSet = revoked.SessionIds.ToHashSet(StringComparer.Ordinal);
+        var revokedSet = (await sessionRevocationService.GetRevokedSessionIdsAsync(tenantId, cancellationToken))
+            .ToHashSet(StringComparer.Ordinal);
 
         var entries = await dbContext.AuditEvents
             .Where(x => x.TenantId == tenantId
@@ -85,26 +78,25 @@ public sealed class SessionMonitorController(
         }
 
         var tenantId = tenantContextAccessor.GetTenantId();
-        var registry = await systemSettingStore.GetAsync(
-            tenantId,
-            RevokedSessionSettingKey,
-            new RevokedSessionRegistry(Array.Empty<string>()),
-            cancellationToken);
-
-        var revokedSet = registry.SessionIds.ToHashSet(StringComparer.Ordinal);
-        revokedSet.Add(sessionId.Trim());
-        var updatedRegistry = new RevokedSessionRegistry(revokedSet.OrderBy(x => x, StringComparer.Ordinal).ToArray());
-
-        await systemSettingStore.SetAsync(tenantId, RevokedSessionSettingKey, updatedRegistry, cancellationToken);
+        var normalizedSessionId = sessionId.Trim();
+        await sessionRevocationService.RevokeAsync(tenantId, normalizedSessionId, cancellationToken);
+        var terminationResult = await sessionTerminationService.TerminateBySessionIdAsync(tenantId, normalizedSessionId, cancellationToken);
         await auditService.WriteAsync(
             new AuditWriteRequest(
                 tenantId,
                 "admin.monitor.session.revoked",
                 $"Session {sessionId} marked as revoked.",
-                TargetJson: $$"""{"sessionId":"{{sessionId}}"}"""),
+                TargetJson: $$"""{"sessionId":"{{sessionId}}","revokedTokens":{{terminationResult.RevokedTokens}},"revokedAuthorizations":{{terminationResult.RevokedAuthorizations}}}"""),
             cancellationToken);
 
-        return Ok(new { sessionId, revoked = true });
+        return Ok(new
+        {
+            sessionId = normalizedSessionId,
+            revoked = true,
+            terminationResult.RevokedTokens,
+            terminationResult.RevokedAuthorizations,
+            terminationResult.AffectedUsers
+        });
     }
 
     private static string ResolveSessionId(NetIAM.Domain.Entities.AuditEventEntity entry)

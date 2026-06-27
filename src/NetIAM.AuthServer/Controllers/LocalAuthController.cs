@@ -47,8 +47,9 @@ public sealed class LocalAuthController(
 
         await userManager.ResetAccessFailedCountAsync(user);
 
+        var sessionId = Guid.NewGuid().ToString("N");
         var expiresAt = DateTimeOffset.UtcNow.AddHours(8);
-        var ticketPayload = $"{tenantId}|{user.Id}|{expiresAt:O}";
+        var ticketPayload = $"{tenantId}|{user.Id}|{expiresAt:O}|{sessionId}";
         var loginTicket = _ticketProtector.Protect(ticketPayload);
 
         await auditService.WriteAsync(
@@ -57,7 +58,11 @@ public sealed class LocalAuthController(
                 "auth.local-login.succeeded",
                 $"User {request.Username} login succeeded.",
                 ActorType: "user",
-                ActorId: user.Id),
+                ActorId: user.Id,
+                RequestId: HttpContext.TraceIdentifier,
+                SessionId: sessionId,
+                UserAgent: Request.Headers.UserAgent.ToString(),
+                IpAddress: HttpContext.Connection.RemoteIpAddress?.ToString()),
             cancellationToken);
 
         return Ok(new
@@ -65,6 +70,7 @@ public sealed class LocalAuthController(
             userId = user.Id,
             username = user.UserName,
             displayName = user.DisplayName,
+            sessionId,
             expiresAt,
             loginTicket
         });

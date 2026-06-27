@@ -1,6 +1,10 @@
 using System.Net;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
+using System.Security.Cryptography.Xml;
 using System.Security.Claims;
 using System.Text;
+using System.Xml;
 using System.Xml.Linq;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -23,11 +27,13 @@ public interface ISamlService
 
 public sealed class SamlService(
     NetIamDbContext dbContext,
-    UserManager<NetIamIdentityUser> userManager) : ISamlService
+    UserManager<NetIamIdentityUser> userManager,
+    ISamlCertificateService samlCertificateService) : ISamlService
 {
     private const string SamlProtocol = "urn:oasis:names:tc:SAML:2.0:protocol";
     private const string SamlAssertion = "urn:oasis:names:tc:SAML:2.0:assertion";
     private const string SamlMetadata = "urn:oasis:names:tc:SAML:2.0:metadata";
+    private const string XmlSignatureNamespace = SignedXml.XmlDsigNamespaceUrl;
 
     public async Task<string> BuildMetadataXmlAsync(string tenantId, string baseUri, CancellationToken cancellationToken = default)
     {
@@ -36,24 +42,48 @@ public sealed class SamlService(
         var tenantSpCount = await dbContext.SamlServiceProviders.CountAsync(
             x => x.TenantId == tenantId && x.Enabled && !x.IsDeleted,
             cancellationToken);
+        var certificateSet = await samlCertificateService.GetSigningCertificateSetAsync(tenantId, cancellationToken);
+        var metadataCertificates = certificateSet.MetadataCertificates
+            .GroupBy(x => x.Thumbprint ?? Convert.ToBase64String(x.RawData), StringComparer.OrdinalIgnoreCase)
+            .Select(x => x.First())
+            .ToArray();
 
+        var idpDescriptor = new XElement(md + "IDPSSODescriptor",
+            new XAttribute("protocolSupportEnumeration", SamlProtocol),
+            new XElement(md + "SingleSignOnService",
+                new XAttribute("Binding", "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST"),
+                new XAttribute("Location", $"{baseUri.TrimEnd('/')}/saml2/sso/default")),
+            new XElement(md + "SingleSignOnService",
+                new XAttribute("Binding", "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"),
+                new XAttribute("Location", $"{baseUri.TrimEnd('/')}/saml2/sso/default")),
+            new XElement(md + "NameIDFormat", "urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified"),
+            new XElement(md + "Organization",
+                new XElement(md + "OrganizationName", new XAttribute(XNamespace.Xml + "lang", "en"), "NetIAM"),
+                new XElement(md + "OrganizationDisplayName", new XAttribute(XNamespace.Xml + "lang", "en"), "NetIAM Identity Provider"),
+                new XElement(md + "OrganizationURL", new XAttribute(XNamespace.Xml + "lang", "en"), baseUri)),
+            new XElement(md + "Extensions",
+                new XElement("NetIamEnabledServiceProviders", tenantSpCount)));
+
+        foreach (var metadataCertificate in metadataCertificates)
+        {
+            idpDescriptor.Add(
+                new XElement(md + "KeyDescriptor",
+                    new XAttribute("use", "signing"),
+                    new XElement(XName.Get("KeyInfo", XmlSignatureNamespace),
+                        new XElement(XName.Get("X509Data", XmlSignatureNamespace),
+                            new XElement(XName.Get("X509Certificate", XmlSignatureNamespace), Convert.ToBase64String(metadataCertificate.RawData))))));
+        }
+
+        var validUntil = metadataCertificates
+            .OrderBy(x => x.NotAfter)
+            .First()
+            .NotAfter
+            .ToUniversalTime()
+            .ToString("o");
         var descriptor = new XElement(md + "EntityDescriptor",
             new XAttribute("entityID", entityId),
-            new XElement(md + "IDPSSODescriptor",
-                new XAttribute("protocolSupportEnumeration", SamlProtocol),
-                new XElement(md + "SingleSignOnService",
-                    new XAttribute("Binding", "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST"),
-                    new XAttribute("Location", $"{baseUri.TrimEnd('/')}/saml2/sso/default")),
-                new XElement(md + "SingleSignOnService",
-                    new XAttribute("Binding", "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"),
-                    new XAttribute("Location", $"{baseUri.TrimEnd('/')}/saml2/sso/default")),
-                new XElement(md + "NameIDFormat", "urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified"),
-                new XElement(md + "Organization",
-                    new XElement(md + "OrganizationName", new XAttribute(XNamespace.Xml + "lang", "en"), "NetIAM"),
-                    new XElement(md + "OrganizationDisplayName", new XAttribute(XNamespace.Xml + "lang", "en"), "NetIAM Identity Provider"),
-                    new XElement(md + "OrganizationURL", new XAttribute(XNamespace.Xml + "lang", "en"), baseUri)),
-                new XElement(md + "Extensions",
-                    new XElement("NetIamEnabledServiceProviders", tenantSpCount))));
+            new XAttribute("validUntil", validUntil),
+            idpDescriptor);
 
         var document = new XDocument(new XDeclaration("1.0", "utf-8", "yes"), descriptor);
         return document.ToString(SaveOptions.DisableFormatting);
@@ -79,6 +109,8 @@ public sealed class SamlService(
         var responseId = $"_{Guid.NewGuid():N}";
         var assertionId = $"_{Guid.NewGuid():N}";
         var nameId = string.IsNullOrWhiteSpace(user.ExternalId) ? user.UserName! : user.ExternalId;
+        var signingCertificateSet = await samlCertificateService.GetSigningCertificateSetAsync(request.TenantId, cancellationToken);
+        var signingCertificate = signingCertificateSet.ActiveCertificate;
 
         var samlp = XNamespace.Get(SamlProtocol);
         var saml = XNamespace.Get(SamlAssertion);
@@ -127,7 +159,19 @@ public sealed class SamlService(
                         new XElement(saml + "AttributeValue", user.Email ?? string.Empty)))));
 
         var document = new XDocument(new XDeclaration("1.0", "utf-8", "yes"), responseXml);
-        var xmlBytes = Encoding.UTF8.GetBytes(document.ToString(SaveOptions.DisableFormatting));
+        var xmlDocument = ToXmlDocument(document);
+        if (serviceProvider.WantSignedAssertions)
+        {
+            SignAssertion(xmlDocument, signingCertificate);
+        }
+
+        if (!string.IsNullOrWhiteSpace(serviceProvider.SigningCertificatePem))
+        {
+            var encryptionCertificate = ParsePemCertificate(serviceProvider.SigningCertificatePem);
+            EncryptAssertion(xmlDocument, encryptionCertificate);
+        }
+
+        var xmlBytes = Encoding.UTF8.GetBytes(xmlDocument.OuterXml);
         var encodedResponse = Convert.ToBase64String(xmlBytes);
 
         return new SamlSsoResponse(
@@ -167,5 +211,104 @@ public sealed class SamlService(
                 </body>
                 </html>
                 """;
+    }
+
+    private static XmlDocument ToXmlDocument(XDocument document)
+    {
+        var xmlDocument = new XmlDocument
+        {
+            PreserveWhitespace = true
+        };
+        xmlDocument.LoadXml(document.ToString(SaveOptions.DisableFormatting));
+        return xmlDocument;
+    }
+
+    private static void SignAssertion(XmlDocument xmlDocument, X509Certificate2 signingCertificate)
+    {
+        var assertion = xmlDocument.GetElementsByTagName("Assertion", SamlAssertion)
+            .OfType<XmlElement>()
+            .FirstOrDefault()
+            ?? throw new InvalidOperationException("SAML assertion node not found.");
+        var assertionId = assertion.GetAttribute("ID");
+        if (string.IsNullOrWhiteSpace(assertionId))
+        {
+            throw new InvalidOperationException("SAML assertion ID is required for signing.");
+        }
+
+        using var signingKey = signingCertificate.GetRSAPrivateKey()
+            ?? throw new InvalidOperationException("SAML signing certificate private key not available.");
+        var signedXml = new SignedXml(assertion)
+        {
+            SigningKey = signingKey
+        };
+        if (signedXml.SignedInfo is null)
+        {
+            throw new InvalidOperationException("SAML signature generation failed to initialize SignedInfo.");
+        }
+
+        signedXml.SignedInfo.CanonicalizationMethod = SignedXml.XmlDsigExcC14NTransformUrl;
+        signedXml.SignedInfo.SignatureMethod = SignedXml.XmlDsigRSASHA256Url;
+
+        var reference = new Reference($"#{assertionId}")
+        {
+            DigestMethod = SignedXml.XmlDsigSHA256Url
+        };
+        reference.AddTransform(new XmlDsigEnvelopedSignatureTransform());
+        reference.AddTransform(new XmlDsigExcC14NTransform());
+        signedXml.AddReference(reference);
+
+        var keyInfo = new KeyInfo();
+        keyInfo.AddClause(new KeyInfoX509Data(signingCertificate));
+        signedXml.KeyInfo = keyInfo;
+        signedXml.ComputeSignature();
+
+        var signatureElement = signedXml.GetXml();
+        var importedSignature = xmlDocument.ImportNode(signatureElement, true);
+        assertion.InsertAfter(importedSignature, assertion.FirstChild);
+    }
+
+    private static void EncryptAssertion(XmlDocument xmlDocument, X509Certificate2 encryptionCertificate)
+    {
+        var assertion = xmlDocument.GetElementsByTagName("Assertion", SamlAssertion)
+            .OfType<XmlElement>()
+            .FirstOrDefault();
+        if (assertion is null)
+        {
+            return;
+        }
+
+        using var rsa = encryptionCertificate.GetRSAPublicKey()
+            ?? throw new InvalidOperationException("SAML SP encryption certificate missing RSA public key.");
+        using var aes = Aes.Create();
+        aes.KeySize = 256;
+
+        var encryptedXml = new EncryptedXml();
+        var encryptedElement = encryptedXml.EncryptData(assertion, aes, content: false);
+
+        var encryptedData = new EncryptedData
+        {
+            Type = EncryptedXml.XmlEncElementUrl,
+            EncryptionMethod = new EncryptionMethod(EncryptedXml.XmlEncAES256Url),
+            CipherData = new CipherData(encryptedElement)
+        };
+
+        var encryptedKey = new EncryptedKey
+        {
+            EncryptionMethod = new EncryptionMethod(EncryptedXml.XmlEncRSAOAEPUrl),
+            CipherData = new CipherData(EncryptedXml.EncryptKey(aes.Key, rsa, useOAEP: true))
+        };
+        encryptedData.KeyInfo = new KeyInfo();
+        encryptedData.KeyInfo.AddClause(new KeyInfoEncryptedKey(encryptedKey));
+
+        var encryptedAssertion = xmlDocument.CreateElement("saml", "EncryptedAssertion", SamlAssertion);
+        encryptedAssertion.AppendChild(xmlDocument.ImportNode(encryptedData.GetXml(), true));
+
+        assertion.ParentNode?.ReplaceChild(encryptedAssertion, assertion);
+    }
+
+    private static X509Certificate2 ParsePemCertificate(string certificatePem)
+    {
+        var parsed = X509Certificate2.CreateFromPem(certificatePem);
+        return X509CertificateLoader.LoadCertificate(parsed.Export(X509ContentType.Cert));
     }
 }

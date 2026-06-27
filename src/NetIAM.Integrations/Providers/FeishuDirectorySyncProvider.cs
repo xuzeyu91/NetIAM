@@ -1,5 +1,4 @@
 using System.Net.Http.Headers;
-using System.Net.Http.Json;
 using System.Text.Json;
 using NetIAM.Domain.Contracts;
 using NetIAM.Domain.Entities;
@@ -27,11 +26,17 @@ public sealed class FeishuDirectorySyncProvider(HttpClient httpClient) : IDirect
         var appSecret = ProviderConfigParser.RequiredString(config, "appSecret");
         var token = await GetTenantAccessTokenAsync(appId, appSecret, cancellationToken);
 
-        using var request = new HttpRequestMessage(
-            HttpMethod.Get,
-            "https://open.feishu.cn/open-apis/contact/v3/departments?page_size=100&fetch_child=true");
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-        using var response = await httpClient.SendAsync(request, cancellationToken);
+        using var response = await httpClient.SendAsyncWithGovernance(
+            "feishu-sync",
+            () =>
+            {
+                var request = new HttpRequestMessage(
+                    HttpMethod.Get,
+                    "https://open.feishu.cn/open-apis/contact/v3/departments?page_size=100&fetch_child=true");
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+                return request;
+            },
+            cancellationToken);
         response.EnsureSuccessStatusCode();
 
         var payload = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken)).RootElement;
@@ -75,11 +80,17 @@ public sealed class FeishuDirectorySyncProvider(HttpClient httpClient) : IDirect
         var appSecret = ProviderConfigParser.RequiredString(config, "appSecret");
         var token = await GetTenantAccessTokenAsync(appId, appSecret, cancellationToken);
 
-        using var request = new HttpRequestMessage(
-            HttpMethod.Get,
-            "https://open.feishu.cn/open-apis/contact/v3/users?page_size=100");
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-        using var response = await httpClient.SendAsync(request, cancellationToken);
+        using var response = await httpClient.SendAsyncWithGovernance(
+            "feishu-sync",
+            () =>
+            {
+                var request = new HttpRequestMessage(
+                    HttpMethod.Get,
+                    "https://open.feishu.cn/open-apis/contact/v3/users?page_size=100");
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+                return request;
+            },
+            cancellationToken);
         response.EnsureSuccessStatusCode();
 
         var payload = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken)).RootElement;
@@ -148,7 +159,8 @@ public sealed class FeishuDirectorySyncProvider(HttpClient httpClient) : IDirect
 
     private async Task<string> GetTenantAccessTokenAsync(string appId, string appSecret, CancellationToken cancellationToken)
     {
-        using var response = await httpClient.PostAsJsonAsync(
+        using var response = await httpClient.PostJsonAsyncWithGovernance(
+            "feishu-sync",
             "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
             new { app_id = appId, app_secret = appSecret },
             cancellationToken);

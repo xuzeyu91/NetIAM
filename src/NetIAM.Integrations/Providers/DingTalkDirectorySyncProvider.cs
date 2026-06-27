@@ -1,4 +1,3 @@
-using System.Net.Http.Json;
 using System.Text.Json;
 using NetIAM.Domain.Contracts;
 using NetIAM.Domain.Entities;
@@ -28,7 +27,8 @@ public sealed class DingTalkDirectorySyncProvider(HttpClient httpClient) : IDire
 
         var accessToken = await GetAccessTokenAsync(appKey, appSecret, cancellationToken);
 
-        using var response = await httpClient.PostAsJsonAsync(
+        using var response = await httpClient.PostJsonAsyncWithGovernance(
+            "dingtalk-sync",
             $"https://oapi.dingtalk.com/topapi/v2/department/listsub?access_token={Uri.EscapeDataString(accessToken)}",
             new { dept_id = rootDeptId },
             cancellationToken);
@@ -75,7 +75,8 @@ public sealed class DingTalkDirectorySyncProvider(HttpClient httpClient) : IDire
 
         foreach (var organization in organizations.Where(x => !string.IsNullOrWhiteSpace(x.ExternalId)))
         {
-            using var response = await httpClient.PostAsJsonAsync(
+            using var response = await httpClient.PostJsonAsyncWithGovernance(
+                "dingtalk-sync",
                 $"https://oapi.dingtalk.com/topapi/v2/user/list?access_token={Uri.EscapeDataString(accessToken)}",
                 new { dept_id = organization.ExternalId, cursor = 0, size = 100 },
                 cancellationToken);
@@ -138,7 +139,8 @@ public sealed class DingTalkDirectorySyncProvider(HttpClient httpClient) : IDire
 
     private async Task<string> GetAccessTokenAsync(string appKey, string appSecret, CancellationToken cancellationToken)
     {
-        using var response = await httpClient.GetAsync(
+        using var response = await httpClient.GetAsyncWithGovernance(
+            "dingtalk-sync",
             $"https://oapi.dingtalk.com/gettoken?appkey={Uri.EscapeDataString(appKey)}&appsecret={Uri.EscapeDataString(appSecret)}",
             cancellationToken);
         response.EnsureSuccessStatusCode();

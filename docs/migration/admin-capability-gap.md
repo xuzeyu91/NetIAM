@@ -26,14 +26,14 @@
 | System Message Settings | mail/sms provider + template | full read/write API | full edit UI | aligned in current scope | P1 |
 | System Storage Settings | object storage config | full read/write API | full edit UI | aligned in current scope | P1 |
 | System GeoIP Settings | geo source config | full read/write API | full edit UI | aligned in current scope | P1 |
-| Monitor Sessions | list/revoke session | list + revoke-marker API | list + revoke UI | partial (no hard logout) | P2 |
+| Monitor Sessions | list/revoke/hard-logout | list + revoke + session termination API | list + revoke UI + session-id propagation | mostly aligned | P1 |
 | RBAC Permissions | list/create | list/create | list/create | partial (missing bulk ops) | P2 |
 | RBAC Roles | list/create/delete + assignment | list/create/delete + role-user binding API | list/create/delete + role-user binding UI | mostly aligned | P1 |
 | User Permission Grants | query/effective/grant/revoke | query/effective/grant/revoke | query/effective/grant/revoke | mostly aligned | P1 |
 | Identity Providers | CRUD | CRUD | CRUD | mostly aligned | P1 |
 | Identity Sources | CRUD + sync/history | CRUD + sync + history/record query | CRUD + sync + history/record query | mostly aligned | P1 |
-| SAML SP Config | CRUD | upsert/list/delete | upsert/list/delete | mostly aligned | P1 |
-| SCIM Token Management | list/create/revoke | list/create/revoke | list/create/revoke | mostly aligned | P1 |
+| SAML SP Config | CRUD + signed/encrypted assertion + cert rollover | upsert/list/delete + signed/encrypted response + auto cert rotation | upsert/list/delete | mostly aligned | P1 |
+| SCIM Provisioning + Token Management | users/groups CRUD+PATCH+bulk + token list/create/revoke | users/groups CRUD+PATCH filter semantics + bulk + token management | token/full CRUD admin UI (bulk via API) | mostly aligned | P1 |
 | Audit Query | list/filter | list (take) | list | mostly aligned | P1 |
 
 ## Quantitative Snapshot (After Fourth-Phase Depth Closure)
@@ -47,9 +47,9 @@
 
 1. Keep current admin closure stable and regression-free.
 2. Fill remaining depth gaps:
-   - monitor hard logout and token/session invalidation semantics
    - RBAC bulk operations and permission policy templates
-   - protocol hardening (SAML cert rollover automation, SCIM patch/bulk semantics).
+   - end-session protocol completeness for full OIDC/SAML logout interop
+   - sandbox credential governance and CI gating for contract/e2e pipelines.
 
 ## Out of Scope in This Matrix
 

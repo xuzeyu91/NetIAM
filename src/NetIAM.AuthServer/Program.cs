@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
+using NetIAM.Infrastructure.Authorization;
 using NetIAM.Infrastructure.Extensions;
 using NetIAM.Infrastructure.Services;
 using OpenTelemetry.Resources;
@@ -68,6 +69,7 @@ app.UseSerilogRequestLogging();
 app.UseRateLimiter();
 app.UseHttpsRedirection();
 app.UseAuthentication();
+app.UseSessionRevocationGuard();
 app.UseAuthorization();
 
 app.MapControllers()

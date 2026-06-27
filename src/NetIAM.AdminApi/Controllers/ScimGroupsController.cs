@@ -15,17 +15,22 @@ public sealed class ScimGroupsController(NetIamDbContext dbContext) : Controller
 {
     public sealed record ScimMemberRef(string Value);
     public sealed record ScimGroupRequest(string DisplayName, IReadOnlyCollection<ScimMemberRef>? Members);
-    public sealed record ScimPatchRequest(IReadOnlyCollection<ScimPatchOperation> Operations);
+    public sealed record ScimPatchRequest(IReadOnlyCollection<ScimPatchOperation>? Operations);
     public sealed record ScimPatchOperation(string Op, string? Path, JsonElement Value);
 
     [HttpGet]
-    public async Task<IActionResult> List([FromQuery] int startIndex = 1, [FromQuery] int count = 50, CancellationToken cancellationToken = default)
+    public async Task<IActionResult> List(
+        [FromQuery] int startIndex = 1,
+        [FromQuery] int count = 50,
+        [FromQuery] string? filter = null,
+        CancellationToken cancellationToken = default)
     {
         var tenantId = ResolveTenantId();
         var normalizedStart = Math.Max(1, startIndex);
         var normalizedCount = Math.Clamp(count, 1, 200);
 
         var query = dbContext.UserGroups.Where(x => x.TenantId == tenantId && !x.IsDeleted);
+        query = ApplyFilter(query, filter);
         var totalResults = await query.CountAsync(cancellationToken);
         var groups = await query
             .OrderBy(x => x.Name)
@@ -108,27 +113,68 @@ public sealed class ScimGroupsController(NetIamDbContext dbContext) : Controller
             return NotFound();
         }
 
-        foreach (var operation in request.Operations)
+        var operations = request.Operations ?? Array.Empty<ScimPatchOperation>();
+        foreach (var operation in operations)
         {
-            if (!string.Equals(operation.Op, "replace", StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(operation.Op, "add", StringComparison.OrdinalIgnoreCase))
+            var op = operation.Op?.Trim().ToLowerInvariant() ?? string.Empty;
+            if (op is not ("replace" or "add" or "remove"))
             {
                 continue;
             }
 
-            var path = operation.Path?.ToLowerInvariant() ?? string.Empty;
+            var path = operation.Path?.Trim().ToLowerInvariant() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(path) && operation.Value.ValueKind == JsonValueKind.Object)
+            {
+                ApplyPatchObject(group, op, operation.Value);
+
+                if (operation.Value.TryGetProperty("members", out var objectMembers))
+                {
+                    var memberIds = ExtractMemberIds(objectMembers);
+                    if (op == "replace")
+                    {
+                        await ReplaceMembersAsync(tenantId, group.Id, memberIds.Select(x => new ScimMemberRef(x)).ToArray(), cancellationToken);
+                    }
+                    else if (op == "add")
+                    {
+                        await AddMembersAsync(tenantId, group.Id, memberIds, cancellationToken);
+                    }
+                    else
+                    {
+                        await RemoveMembersAsync(tenantId, group.Id, memberIds, removeAllWhenEmpty: memberIds.Count == 0, cancellationToken);
+                    }
+                }
+
+                continue;
+            }
+
             if (path is "displayname")
             {
-                group.Name = operation.Value.GetString() ?? group.Name;
+                if (op != "remove")
+                {
+                    group.Name = operation.Value.GetString() ?? group.Name;
+                }
             }
-            else if (path.StartsWith("members") && operation.Value.ValueKind == JsonValueKind.Array)
+            else if (path.StartsWith("members", StringComparison.Ordinal))
             {
-                var members = operation.Value.EnumerateArray()
-                    .Select(x => x.TryGetProperty("value", out var value) ? value.GetString() : null)
-                    .Where(x => !string.IsNullOrWhiteSpace(x))
-                    .Select(x => new ScimMemberRef(x!))
-                    .ToArray();
-                await ReplaceMembersAsync(tenantId, group.Id, members, cancellationToken);
+                if (op == "replace")
+                {
+                    var members = ExtractMemberIds(operation.Value)
+                        .Select(x => new ScimMemberRef(x))
+                        .ToArray();
+                    await ReplaceMembersAsync(tenantId, group.Id, members, cancellationToken);
+                }
+                else if (op == "add")
+                {
+                    await AddMembersAsync(tenantId, group.Id, ExtractMemberIds(operation.Value), cancellationToken);
+                }
+                else
+                {
+                    var filterMember = ExtractMemberIdFromPathFilter(path);
+                    var members = filterMember is not null
+                        ? new[] { filterMember }
+                        : ExtractMemberIds(operation.Value).ToArray();
+                    await RemoveMembersAsync(tenantId, group.Id, members, removeAllWhenEmpty: filterMember is null && members.Length == 0, cancellationToken);
+                }
             }
         }
 
@@ -170,34 +216,90 @@ public sealed class ScimGroupsController(NetIamDbContext dbContext) : Controller
         IReadOnlyCollection<ScimMemberRef>? members,
         CancellationToken cancellationToken)
     {
-        var existingMembers = await dbContext.UserGroupMembers
+        await RemoveMembersAsync(tenantId, groupId, Array.Empty<string>(), removeAllWhenEmpty: true, cancellationToken);
+        if (members is null || members.Count == 0)
+        {
+            return;
+        }
+
+        await AddMembersAsync(tenantId, groupId, members.Select(x => x.Value), cancellationToken);
+    }
+
+    private async Task AddMembersAsync(
+        string tenantId,
+        string groupId,
+        IEnumerable<string> memberIds,
+        CancellationToken cancellationToken)
+    {
+        var normalizedMemberIds = memberIds
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(x => x.Trim())
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (normalizedMemberIds.Length == 0)
+        {
+            return;
+        }
+
+        var existingActiveMemberIds = await dbContext.UserGroupMembers
             .Where(x => x.TenantId == tenantId && x.UserGroupId == groupId && !x.IsDeleted)
+            .Select(x => x.UserId)
             .ToListAsync(cancellationToken);
+
+        foreach (var memberId in normalizedMemberIds)
+        {
+            if (existingActiveMemberIds.Contains(memberId, StringComparer.Ordinal))
+            {
+                continue;
+            }
+
+            var userExists = await dbContext.Users.AnyAsync(
+                x => x.TenantId == tenantId && x.Id == memberId && !x.IsDeleted,
+                cancellationToken);
+            if (!userExists)
+            {
+                continue;
+            }
+
+            dbContext.UserGroupMembers.Add(new UserGroupMemberEntity
+            {
+                TenantId = tenantId,
+                UserGroupId = groupId,
+                UserId = memberId
+            });
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task RemoveMembersAsync(
+        string tenantId,
+        string groupId,
+        IEnumerable<string> memberIds,
+        bool removeAllWhenEmpty,
+        CancellationToken cancellationToken)
+    {
+        var normalizedMemberIds = memberIds
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(x => x.Trim())
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        var query = dbContext.UserGroupMembers
+            .Where(x => x.TenantId == tenantId && x.UserGroupId == groupId && !x.IsDeleted);
+        if (normalizedMemberIds.Length > 0)
+        {
+            query = query.Where(x => normalizedMemberIds.Contains(x.UserId));
+        }
+        else if (!removeAllWhenEmpty)
+        {
+            return;
+        }
+
+        var existingMembers = await query.ToListAsync(cancellationToken);
         foreach (var existing in existingMembers)
         {
             existing.IsDeleted = true;
             existing.UpdateTime = DateTimeOffset.UtcNow;
-        }
-
-        if (members is not null)
-        {
-            foreach (var member in members)
-            {
-                var userExists = await dbContext.Users.AnyAsync(
-                    x => x.TenantId == tenantId && x.Id == member.Value && !x.IsDeleted,
-                    cancellationToken);
-                if (!userExists)
-                {
-                    continue;
-                }
-
-                dbContext.UserGroupMembers.Add(new UserGroupMemberEntity
-                {
-                    TenantId = tenantId,
-                    UserGroupId = groupId,
-                    UserId = member.Value
-                });
-            }
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -222,5 +324,99 @@ public sealed class ScimGroupsController(NetIamDbContext dbContext) : Controller
         }
 
         return principal.TenantId;
+    }
+
+    private static IQueryable<UserGroupEntity> ApplyFilter(IQueryable<UserGroupEntity> query, string? filter)
+    {
+        if (string.IsNullOrWhiteSpace(filter))
+        {
+            return query;
+        }
+
+        var normalized = filter.Trim();
+        if (normalized.StartsWith("displayName eq ", StringComparison.OrdinalIgnoreCase))
+        {
+            var value = normalized["displayName eq ".Length..].Trim().Trim('"');
+            return query.Where(x => x.Name == value);
+        }
+
+        if (normalized.StartsWith("id eq ", StringComparison.OrdinalIgnoreCase))
+        {
+            var value = normalized["id eq ".Length..].Trim().Trim('"');
+            return query.Where(x => x.Id == value);
+        }
+
+        return query;
+    }
+
+    private static void ApplyPatchObject(UserGroupEntity group, string op, JsonElement value)
+    {
+        if (op == "remove")
+        {
+            return;
+        }
+
+        if (value.TryGetProperty("displayName", out var displayName))
+        {
+            group.Name = displayName.GetString() ?? group.Name;
+        }
+    }
+
+    private static IReadOnlyCollection<string> ExtractMemberIds(JsonElement value)
+    {
+        var memberIds = new List<string>();
+        if (value.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var node in value.EnumerateArray())
+            {
+                var memberId = node.ValueKind == JsonValueKind.String
+                    ? node.GetString()
+                    : node.TryGetProperty("value", out var memberNode) ? memberNode.GetString() : null;
+                if (!string.IsNullOrWhiteSpace(memberId))
+                {
+                    memberIds.Add(memberId.Trim());
+                }
+            }
+        }
+        else if (value.ValueKind == JsonValueKind.Object && value.TryGetProperty("value", out var singleMember))
+        {
+            var memberId = singleMember.GetString();
+            if (!string.IsNullOrWhiteSpace(memberId))
+            {
+                memberIds.Add(memberId.Trim());
+            }
+        }
+        else if (value.ValueKind == JsonValueKind.String)
+        {
+            var memberId = value.GetString();
+            if (!string.IsNullOrWhiteSpace(memberId))
+            {
+                memberIds.Add(memberId.Trim());
+            }
+        }
+
+        return memberIds.Distinct(StringComparer.Ordinal).ToArray();
+    }
+
+    private static string? ExtractMemberIdFromPathFilter(string path)
+    {
+        var normalized = path.Trim().ToLowerInvariant();
+        var start = normalized.IndexOf('[', StringComparison.Ordinal);
+        var end = normalized.IndexOf(']', StringComparison.Ordinal);
+        if (start < 0 || end <= start)
+        {
+            return null;
+        }
+
+        var condition = normalized.Substring(start + 1, end - start - 1).Trim();
+        var tokens = condition.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (tokens.Length == 3
+            && string.Equals(tokens[0], "value", StringComparison.Ordinal)
+            && string.Equals(tokens[1], "eq", StringComparison.Ordinal))
+        {
+            return tokens[2].Trim('"');
+        }
+
+        return null;
     }
 }
