@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using NetIAM.Domain.Entities;
+using NetIAM.Infrastructure.Authorization;
 using NetIAM.Infrastructure.Persistence;
 using NetIAM.Infrastructure.Services;
 
@@ -15,6 +16,7 @@ public sealed class TenantsController(
     public sealed record CreateTenantRequest(string Identifier, string Name, string? DefaultDomain);
 
     [HttpGet]
+    [RequirePermission("tenant.read")]
     public async Task<IActionResult> List(CancellationToken cancellationToken)
     {
         var tenants = await dbContext.Tenants
@@ -25,6 +27,7 @@ public sealed class TenantsController(
     }
 
     [HttpPost]
+    [RequirePermission("tenant.write")]
     public async Task<IActionResult> Create([FromBody] CreateTenantRequest request, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.Identifier) || string.IsNullOrWhiteSpace(request.Name))

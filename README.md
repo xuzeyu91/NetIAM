@@ -7,6 +7,11 @@ NetIAM is a .NET 10 based IAM platform that references eiam architecture pattern
 - account binding (`ThirdPartyUser` + `UserIdpBind`) with auto-link by `ExternalId`
 - directory sync engine (pull + webhook normalization)
 - OpenIddict-based OIDC/JWT capability for downstream applications
+- phase 2 extensions:
+  - fine-grained RBAC (`permission`, `role_permission`, `user_permission_grant`)
+  - SAML IdP metadata + SSO/ACS endpoints
+  - SCIM 2.0 Users/Groups + token management
+  - real provider API mode for DingTalk/Feishu/WeCom directory sync
 
 ## Repository Structure
 
@@ -69,3 +74,22 @@ Seeded by `INetIamDataSeeder`:
 
 - API tenant context is resolved from `X-Tenant-Id` request header.
 - OpenIddict client bootstrap endpoint: `POST /api/bootstrap/oidc/clients` on AuthServer.
+- RBAC protected admin endpoints can use bearer token claims, or dev header fallback `X-Acting-User-Id`.
+
+## Phase 2 API Quick Reference
+
+- RBAC
+  - `GET /api/admin/rbac/permissions`
+  - `POST /api/admin/rbac/permissions`
+  - `POST /api/admin/rbac/roles/{roleName}/permissions/{permissionCode}`
+  - `POST /api/admin/rbac/users/{userId}/grants`
+- SAML
+  - `GET /api/admin/saml/service-providers`
+  - `POST /api/admin/saml/service-providers`
+  - `GET /saml2/metadata/{tenantId?}`
+  - `GET /saml2/sso/{serviceProviderCode}?userId={id}`
+- SCIM
+  - `GET /api/admin/scim/tokens`
+  - `POST /api/admin/scim/tokens`
+  - `GET /scim/v2/Users`
+  - `GET /scim/v2/Groups`

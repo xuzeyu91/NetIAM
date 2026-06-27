@@ -1,3 +1,4 @@
+using System.Net.Http.Json;
 using System.Text.Json;
 using NetIAM.Domain.Contracts;
 using NetIAM.Domain.Entities;
@@ -7,22 +8,115 @@ using NetIAM.Integrations.Internal;
 
 namespace NetIAM.Integrations.Providers;
 
-public sealed class DingTalkDirectorySyncProvider : IDirectorySyncProvider
+public sealed class DingTalkDirectorySyncProvider(HttpClient httpClient) : IDirectorySyncProvider
 {
     public IdentitySourceProviderType ProviderType => IdentitySourceProviderType.DingTalk;
 
-    public Task<IReadOnlyCollection<DirectoryOrganizationSnapshot>> PullOrganizationsAsync(
+    public async Task<IReadOnlyCollection<DirectoryOrganizationSnapshot>> PullOrganizationsAsync(
         IdentitySourceEntity identitySource,
         CancellationToken cancellationToken = default)
     {
-        return Task.FromResult(ReadOrganizationsFromConfig(identitySource));
+        var config = ProviderConfigParser.ParseIdentitySourceConfig(identitySource);
+        if (UseMock(config) || !HasCredentials(config, "appKey", "appSecret"))
+        {
+            return ReadOrganizationsFromConfig(config);
+        }
+
+        var appKey = ProviderConfigParser.RequiredString(config, "appKey");
+        var appSecret = ProviderConfigParser.RequiredString(config, "appSecret");
+        var rootDeptId = ProviderConfigParser.OptionalInt(config, "rootDeptId", 1);
+
+        var accessToken = await GetAccessTokenAsync(appKey, appSecret, cancellationToken);
+
+        using var response = await httpClient.PostAsJsonAsync(
+            $"https://oapi.dingtalk.com/topapi/v2/department/listsub?access_token={Uri.EscapeDataString(accessToken)}",
+            new { dept_id = rootDeptId },
+            cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        var payload = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken)).RootElement;
+        ThrowIfApiError(payload);
+
+        var result = new List<DirectoryOrganizationSnapshot>
+        {
+            new(rootDeptId.ToString(), ProviderConfigParser.OptionalString(config, "rootDeptName", "Root"), null)
+        };
+        if (!payload.TryGetProperty("result", out var nodes) || nodes.ValueKind != JsonValueKind.Array)
+        {
+            return result;
+        }
+
+        foreach (var node in nodes.EnumerateArray())
+        {
+            var externalId = node.GetProperty("dept_id").ToString();
+            var name = node.TryGetProperty("name", out var nameValue) ? nameValue.GetString() ?? externalId : externalId;
+            var parentId = node.TryGetProperty("parent_id", out var parentValue) ? parentValue.ToString() : rootDeptId.ToString();
+            result.Add(new DirectoryOrganizationSnapshot(externalId, name, parentId == rootDeptId.ToString() ? rootDeptId.ToString() : parentId));
+        }
+
+        return result;
     }
 
-    public Task<IReadOnlyCollection<DirectoryUserSnapshot>> PullUsersAsync(
+    public async Task<IReadOnlyCollection<DirectoryUserSnapshot>> PullUsersAsync(
         IdentitySourceEntity identitySource,
         CancellationToken cancellationToken = default)
     {
-        return Task.FromResult(ReadUsersFromConfig(identitySource));
+        var config = ProviderConfigParser.ParseIdentitySourceConfig(identitySource);
+        if (UseMock(config) || !HasCredentials(config, "appKey", "appSecret"))
+        {
+            return ReadUsersFromConfig(config);
+        }
+
+        var appKey = ProviderConfigParser.RequiredString(config, "appKey");
+        var appSecret = ProviderConfigParser.RequiredString(config, "appSecret");
+        var accessToken = await GetAccessTokenAsync(appKey, appSecret, cancellationToken);
+        var organizations = await PullOrganizationsAsync(identitySource, cancellationToken);
+        var userMap = new Dictionary<string, DirectoryUserSnapshot>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var organization in organizations.Where(x => !string.IsNullOrWhiteSpace(x.ExternalId)))
+        {
+            using var response = await httpClient.PostAsJsonAsync(
+                $"https://oapi.dingtalk.com/topapi/v2/user/list?access_token={Uri.EscapeDataString(accessToken)}",
+                new { dept_id = organization.ExternalId, cursor = 0, size = 100 },
+                cancellationToken);
+            response.EnsureSuccessStatusCode();
+
+            var payload = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken)).RootElement;
+            ThrowIfApiError(payload);
+
+            if (!payload.TryGetProperty("result", out var resultNode)
+                || !resultNode.TryGetProperty("list", out var usersNode)
+                || usersNode.ValueKind != JsonValueKind.Array)
+            {
+                continue;
+            }
+
+            foreach (var userNode in usersNode.EnumerateArray())
+            {
+                var externalId = userNode.TryGetProperty("userid", out var userIdNode)
+                    ? userIdNode.GetString()
+                    : null;
+                if (string.IsNullOrWhiteSpace(externalId))
+                {
+                    continue;
+                }
+
+                var username = externalId;
+                var displayName = userNode.TryGetProperty("name", out var displayNameNode)
+                    ? displayNameNode.GetString() ?? externalId
+                    : externalId;
+
+                userMap[externalId] = new DirectoryUserSnapshot(
+                    externalId,
+                    username,
+                    displayName,
+                    userNode.TryGetProperty("email", out var email) ? email.GetString() : null,
+                    userNode.TryGetProperty("mobile", out var mobile) ? mobile.GetString() : null,
+                    organization.ExternalId);
+            }
+        }
+
+        return userMap.Values.ToArray();
     }
 
     public Task<DirectoryNormalizedEvent?> NormalizeWebhookAsync(
@@ -42,9 +136,45 @@ public sealed class DingTalkDirectorySyncProvider : IDirectorySyncProvider
             new DirectoryNormalizedEvent(eventType, externalId, payload));
     }
 
-    private static IReadOnlyCollection<DirectoryOrganizationSnapshot> ReadOrganizationsFromConfig(IdentitySourceEntity source)
+    private async Task<string> GetAccessTokenAsync(string appKey, string appSecret, CancellationToken cancellationToken)
     {
-        var config = ProviderConfigParser.ParseIdentitySourceConfig(source);
+        using var response = await httpClient.GetAsync(
+            $"https://oapi.dingtalk.com/gettoken?appkey={Uri.EscapeDataString(appKey)}&appsecret={Uri.EscapeDataString(appSecret)}",
+            cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        var payload = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken)).RootElement;
+        ThrowIfApiError(payload);
+        return payload.GetProperty("access_token").GetString()
+               ?? throw new InvalidOperationException("DingTalk access_token missing.");
+    }
+
+    private static bool UseMock(JsonElement config)
+    {
+        return ProviderConfigParser.OptionalBoolean(config, "useMock", false);
+    }
+
+    private static bool HasCredentials(JsonElement config, string keyA, string keyB)
+    {
+        return !string.IsNullOrWhiteSpace(ProviderConfigParser.OptionalString(config, keyA))
+               && !string.IsNullOrWhiteSpace(ProviderConfigParser.OptionalString(config, keyB));
+    }
+
+    private static void ThrowIfApiError(JsonElement payload)
+    {
+        if (payload.TryGetProperty("errcode", out var errCodeNode))
+        {
+            var errCode = errCodeNode.GetInt32();
+            if (errCode != 0)
+            {
+                var errMessage = payload.TryGetProperty("errmsg", out var errMessageNode) ? errMessageNode.GetString() : "unknown";
+                throw new InvalidOperationException($"DingTalk API error ({errCode}): {errMessage}");
+            }
+        }
+    }
+
+    private static IReadOnlyCollection<DirectoryOrganizationSnapshot> ReadOrganizationsFromConfig(JsonElement config)
+    {
         if (!config.TryGetProperty("mockOrganizations", out var nodes) || nodes.ValueKind != JsonValueKind.Array)
         {
             return [];
@@ -62,9 +192,8 @@ public sealed class DingTalkDirectorySyncProvider : IDirectorySyncProvider
         return result;
     }
 
-    private static IReadOnlyCollection<DirectoryUserSnapshot> ReadUsersFromConfig(IdentitySourceEntity source)
+    private static IReadOnlyCollection<DirectoryUserSnapshot> ReadUsersFromConfig(JsonElement config)
     {
-        var config = ProviderConfigParser.ParseIdentitySourceConfig(source);
         if (!config.TryGetProperty("mockUsers", out var nodes) || nodes.ValueKind != JsonValueKind.Array)
         {
             return [];

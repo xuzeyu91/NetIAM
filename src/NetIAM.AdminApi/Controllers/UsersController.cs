@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using NetIAM.Infrastructure.Identity;
+using NetIAM.Infrastructure.Authorization;
 using NetIAM.Infrastructure.Services;
 
 namespace NetIAM.AdminApi.Controllers;
@@ -28,6 +29,7 @@ public sealed class UsersController(
         string? ExternalId);
 
     [HttpGet]
+    [RequirePermission("user.read")]
     public async Task<IActionResult> List(CancellationToken cancellationToken)
     {
         var tenantId = tenantContextAccessor.GetTenantId();
@@ -53,6 +55,7 @@ public sealed class UsersController(
     }
 
     [HttpPost]
+    [RequirePermission("user.write")]
     public async Task<IActionResult> Create([FromBody] CreateUserRequest request, CancellationToken cancellationToken)
     {
         var tenantId = tenantContextAccessor.GetTenantId();
@@ -86,6 +89,7 @@ public sealed class UsersController(
     }
 
     [HttpPut("{id}")]
+    [RequirePermission("user.write")]
     public async Task<IActionResult> Update(string id, [FromBody] UpdateUserRequest request, CancellationToken cancellationToken)
     {
         var tenantId = tenantContextAccessor.GetTenantId();
@@ -119,6 +123,7 @@ public sealed class UsersController(
     }
 
     [HttpDelete("{id}")]
+    [RequirePermission("user.write")]
     public async Task<IActionResult> Delete(string id, CancellationToken cancellationToken)
     {
         var tenantId = tenantContextAccessor.GetTenantId();

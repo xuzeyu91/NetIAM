@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using NetIAM.Domain.Entities;
 using NetIAM.Domain.Enums;
+using NetIAM.Infrastructure.Authorization;
 using NetIAM.Infrastructure.Persistence;
 using NetIAM.Infrastructure.Services;
 
@@ -20,6 +21,7 @@ public sealed class OrganizationsController(
         string? ParentId = null);
 
     [HttpGet]
+    [RequirePermission("organization.read")]
     public async Task<IActionResult> List(CancellationToken cancellationToken)
     {
         var tenantId = tenantContextAccessor.GetTenantId();
@@ -32,6 +34,7 @@ public sealed class OrganizationsController(
     }
 
     [HttpPost]
+    [RequirePermission("organization.write")]
     public async Task<IActionResult> Create([FromBody] CreateOrganizationRequest request, CancellationToken cancellationToken)
     {
         var tenantId = tenantContextAccessor.GetTenantId();

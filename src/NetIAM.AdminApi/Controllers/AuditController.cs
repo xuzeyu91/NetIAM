@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using NetIAM.Infrastructure.Authorization;
 using NetIAM.Infrastructure.Persistence;
 using NetIAM.Infrastructure.Services;
 
@@ -12,6 +13,7 @@ public sealed class AuditController(
     ITenantContextAccessor tenantContextAccessor) : ControllerBase
 {
     [HttpGet]
+    [RequirePermission("audit.read")]
     public async Task<IActionResult> List([FromQuery] int take = 100, CancellationToken cancellationToken = default)
     {
         var tenantId = tenantContextAccessor.GetTenantId();

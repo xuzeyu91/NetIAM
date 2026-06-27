@@ -33,11 +33,21 @@ public sealed class NetIamDbContext(DbContextOptions<NetIamDbContext> options)
 
     public DbSet<AppAccessPolicyEntity> AppAccessPolicies => Set<AppAccessPolicyEntity>();
 
+    public DbSet<PermissionEntity> Permissions => Set<PermissionEntity>();
+
+    public DbSet<RolePermissionEntity> RolePermissions => Set<RolePermissionEntity>();
+
+    public DbSet<UserPermissionGrantEntity> UserPermissionGrants => Set<UserPermissionGrantEntity>();
+
     public DbSet<IdentitySourceSyncHistoryEntity> IdentitySourceSyncHistories => Set<IdentitySourceSyncHistoryEntity>();
 
     public DbSet<IdentitySourceSyncRecordEntity> IdentitySourceSyncRecords => Set<IdentitySourceSyncRecordEntity>();
 
     public DbSet<AuditEventEntity> AuditEvents => Set<AuditEventEntity>();
+
+    public DbSet<SamlServiceProviderEntity> SamlServiceProviders => Set<SamlServiceProviderEntity>();
+
+    public DbSet<ScimAccessTokenEntity> ScimAccessTokens => Set<ScimAccessTokenEntity>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -51,8 +61,10 @@ public sealed class NetIamDbContext(DbContextOptions<NetIamDbContext> options)
         ConfigureAuthProviders(builder);
         ConfigureAuthBindings(builder);
         ConfigureApplications(builder);
+        ConfigureRbac(builder);
         ConfigureSync(builder);
         ConfigureAudit(builder);
+        ConfigureSamlScim(builder);
     }
 
     private static void ConfigureIdentity(ModelBuilder builder)
@@ -337,6 +349,43 @@ public sealed class NetIamDbContext(DbContextOptions<NetIamDbContext> options)
         });
     }
 
+    private static void ConfigureRbac(ModelBuilder builder)
+    {
+        builder.Entity<PermissionEntity>(entity =>
+        {
+            entity.ToTable("eiam_permission");
+            entity.Property(p => p.TenantId).HasColumnName("tenant_id").HasMaxLength(64).IsRequired();
+            entity.Property(p => p.Code).HasColumnName("code_").HasMaxLength(128).IsRequired();
+            entity.Property(p => p.Name).HasColumnName("name_").HasMaxLength(128).IsRequired();
+            entity.Property(p => p.Resource).HasColumnName("resource_").HasMaxLength(128).IsRequired();
+            entity.Property(p => p.Action).HasColumnName("action_").HasMaxLength(64).IsRequired();
+            entity.Property(p => p.Description).HasColumnName("description_").HasMaxLength(512);
+            entity.HasIndex(p => new { p.TenantId, p.Code }).IsUnique();
+            ConfigureAuditedColumns(entity);
+        });
+
+        builder.Entity<RolePermissionEntity>(entity =>
+        {
+            entity.ToTable("eiam_role_permission");
+            entity.Property(p => p.TenantId).HasColumnName("tenant_id").HasMaxLength(64).IsRequired();
+            entity.Property(p => p.RoleId).HasColumnName("role_id").HasMaxLength(64).IsRequired();
+            entity.Property(p => p.PermissionId).HasColumnName("permission_id").HasMaxLength(64).IsRequired();
+            entity.HasIndex(p => new { p.TenantId, p.RoleId, p.PermissionId }).IsUnique();
+            ConfigureAuditedColumns(entity);
+        });
+
+        builder.Entity<UserPermissionGrantEntity>(entity =>
+        {
+            entity.ToTable("eiam_user_permission_grant");
+            entity.Property(p => p.TenantId).HasColumnName("tenant_id").HasMaxLength(64).IsRequired();
+            entity.Property(p => p.UserId).HasColumnName("user_id").HasMaxLength(64).IsRequired();
+            entity.Property(p => p.PermissionId).HasColumnName("permission_id").HasMaxLength(64).IsRequired();
+            entity.Property(p => p.Effect).HasColumnName("effect_").HasConversion<int>();
+            entity.HasIndex(p => new { p.TenantId, p.UserId, p.PermissionId, p.Effect }).IsUnique();
+            ConfigureAuditedColumns(entity);
+        });
+    }
+
     private static void ConfigureAudit(ModelBuilder builder)
     {
         builder.Entity<AuditEventEntity>(entity =>
@@ -356,6 +405,45 @@ public sealed class NetIamDbContext(DbContextOptions<NetIamDbContext> options)
             entity.Property(p => p.ResultStatus).HasColumnName("result_status").HasMaxLength(32).IsRequired();
             entity.Property(p => p.OccurredTime).HasColumnName("occurred_time");
             entity.HasIndex(p => new { p.TenantId, p.OccurredTime });
+            ConfigureAuditedColumns(entity);
+        });
+    }
+
+    private static void ConfigureSamlScim(ModelBuilder builder)
+    {
+        builder.Entity<SamlServiceProviderEntity>(entity =>
+        {
+            entity.ToTable("eiam_saml_service_provider");
+            entity.Property(p => p.TenantId).HasColumnName("tenant_id").HasMaxLength(64).IsRequired();
+            entity.Property(p => p.Code).HasColumnName("code_").HasMaxLength(128).IsRequired();
+            entity.Property(p => p.Name).HasColumnName("name_").HasMaxLength(128).IsRequired();
+            entity.Property(p => p.EntityId).HasColumnName("entity_id").HasMaxLength(512).IsRequired();
+            entity.Property(p => p.AssertionConsumerServiceUrl).HasColumnName("acs_url").HasMaxLength(1024).IsRequired();
+            entity.Property(p => p.SingleLogoutServiceUrl).HasColumnName("slo_url").HasMaxLength(1024);
+            entity.Property(p => p.NameIdFormat).HasColumnName("name_id_format").HasMaxLength(256).IsRequired();
+            entity.Property(p => p.Audience).HasColumnName("audience_").HasMaxLength(512);
+            entity.Property(p => p.RelayStateDefault).HasColumnName("relay_state_default").HasMaxLength(512);
+            entity.Property(p => p.WantSignedAssertions).HasColumnName("want_signed_assertions");
+            entity.Property(p => p.AllowUnsolicitedResponse).HasColumnName("allow_unsolicited_response");
+            entity.Property(p => p.BindingType).HasColumnName("binding_type").HasConversion<int>();
+            entity.Property(p => p.SigningCertificatePem).HasColumnName("signing_cert_pem").HasColumnType("text");
+            entity.Property(p => p.Enabled).HasColumnName("enabled_");
+            entity.HasIndex(p => new { p.TenantId, p.Code }).IsUnique();
+            entity.HasIndex(p => new { p.TenantId, p.EntityId }).IsUnique();
+            ConfigureAuditedColumns(entity);
+        });
+
+        builder.Entity<ScimAccessTokenEntity>(entity =>
+        {
+            entity.ToTable("eiam_scim_access_token");
+            entity.Property(p => p.TenantId).HasColumnName("tenant_id").HasMaxLength(64).IsRequired();
+            entity.Property(p => p.Name).HasColumnName("name_").HasMaxLength(128).IsRequired();
+            entity.Property(p => p.TokenHash).HasColumnName("token_hash").HasMaxLength(256).IsRequired();
+            entity.Property(p => p.ExpiresTime).HasColumnName("expires_time");
+            entity.Property(p => p.LastUsedTime).HasColumnName("last_used_time");
+            entity.Property(p => p.IsActive).HasColumnName("is_active");
+            entity.HasIndex(p => p.TokenHash).IsUnique();
+            entity.HasIndex(p => new { p.TenantId, p.Name }).IsUnique();
             ConfigureAuditedColumns(entity);
         });
     }

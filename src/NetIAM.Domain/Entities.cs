@@ -187,6 +187,87 @@ public sealed class AppAccessPolicyEntity : AuditedEntityBase
     public bool AllowAccess { get; set; } = true;
 }
 
+public sealed class PermissionEntity : AuditedEntityBase
+{
+    public string TenantId { get; set; } = string.Empty;
+
+    public string Code { get; set; } = string.Empty;
+
+    public string Name { get; set; } = string.Empty;
+
+    public string Resource { get; set; } = string.Empty;
+
+    public string Action { get; set; } = string.Empty;
+
+    public string? Description { get; set; }
+}
+
+public sealed class RolePermissionEntity : AuditedEntityBase
+{
+    public string TenantId { get; set; } = string.Empty;
+
+    public string RoleId { get; set; } = string.Empty;
+
+    public string PermissionId { get; set; } = string.Empty;
+}
+
+public sealed class UserPermissionGrantEntity : AuditedEntityBase
+{
+    public string TenantId { get; set; } = string.Empty;
+
+    public string UserId { get; set; } = string.Empty;
+
+    public string PermissionId { get; set; } = string.Empty;
+
+    public PermissionGrantEffect Effect { get; set; } = PermissionGrantEffect.Allow;
+}
+
+public sealed class SamlServiceProviderEntity : AuditedEntityBase
+{
+    public string TenantId { get; set; } = string.Empty;
+
+    public string Code { get; set; } = string.Empty;
+
+    public string Name { get; set; } = string.Empty;
+
+    public string EntityId { get; set; } = string.Empty;
+
+    public string AssertionConsumerServiceUrl { get; set; } = string.Empty;
+
+    public string? SingleLogoutServiceUrl { get; set; }
+
+    public string NameIdFormat { get; set; } = "urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified";
+
+    public string? Audience { get; set; }
+
+    public string? RelayStateDefault { get; set; }
+
+    public bool WantSignedAssertions { get; set; } = true;
+
+    public bool AllowUnsolicitedResponse { get; set; }
+
+    public SamlBindingType BindingType { get; set; } = SamlBindingType.HttpPost;
+
+    public string? SigningCertificatePem { get; set; }
+
+    public bool Enabled { get; set; } = true;
+}
+
+public sealed class ScimAccessTokenEntity : AuditedEntityBase
+{
+    public string TenantId { get; set; } = string.Empty;
+
+    public string Name { get; set; } = string.Empty;
+
+    public string TokenHash { get; set; } = string.Empty;
+
+    public DateTimeOffset? ExpiresTime { get; set; }
+
+    public DateTimeOffset? LastUsedTime { get; set; }
+
+    public bool IsActive { get; set; } = true;
+}
+
 public sealed class IdentitySourceSyncHistoryEntity : AuditedEntityBase
 {
     public string TenantId { get; set; } = string.Empty;

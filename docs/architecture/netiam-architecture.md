@@ -31,9 +31,14 @@ flowchart LR
   - OpenIddict server endpoints (`/connect/authorize`, `/connect/token`, `/connect/introspect`, `/connect/userinfo`)
   - local account login endpoint (`/api/auth/local-login`)
   - OIDC client bootstrap endpoint (`/api/bootstrap/oidc/clients`)
+  - SAML endpoints (`/saml2/metadata`, `/saml2/sso`, `/saml2/acs`)
 - `NetIAM.AdminApi`
   - user/organization/tenant/provider/source/app/audit admin APIs
   - identity source sync trigger and webhook receive endpoint
+  - RBAC APIs (`/api/admin/rbac/*`)
+  - SAML SP management APIs (`/api/admin/saml/service-providers`)
+  - SCIM token management (`/api/admin/scim/tokens`)
+  - SCIM 2.0 provisioning (`/scim/v2/Users`, `/scim/v2/Groups`)
 - `NetIAM.PortalApi`
   - SSO authorization entry (`/authn/{provider}/{code}`)
   - callback processing (`/login/{provider}/{code}`)
@@ -49,6 +54,9 @@ flowchart LR
 - `NetIamIdentityUser.ExternalId` enables auto-bind strategy
 - `IdentitySourceSyncHistoryEntity` + `IdentitySourceSyncRecordEntity` stores synchronization audit trail
 - `AuditEventEntity` records key authentication/admin/sync events
+- `PermissionEntity` + `RolePermissionEntity` + `UserPermissionGrantEntity` enable fine-grained RBAC
+- `SamlServiceProviderEntity` stores per-tenant SAML SP integration config
+- `ScimAccessTokenEntity` stores hashed SCIM API bearer tokens
 
 ## Security & Observability
 

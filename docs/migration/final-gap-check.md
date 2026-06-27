@@ -20,6 +20,11 @@
 - OIDC/JWT base
   - OpenIddict server wired with EF stores
   - OIDC client bootstrap endpoint
+- phase2 extension
+  - fine-grained RBAC (`permission` / `role_permission` / `user_permission_grant`)
+  - SCIM 2.0 (`/scim/v2/Users`, `/scim/v2/Groups`) with token-based authorization
+  - SAML IdP (`/saml2/metadata`, `/saml2/sso`, `/saml2/acs`)
+  - real provider API mode for DingTalk/Feishu/WeCom directory sync
 - operational baseline
   - Redis-backed data protection
   - fixed-window request limiting
@@ -32,10 +37,11 @@
 - `npm run build` passes for `web/admin` and `web/portal`
 - EF migration generated successfully:
   - `src/NetIAM.Infrastructure/Persistence/Migrations/20260627053351_InitialCoreSchema.cs`
+  - `src/NetIAM.Infrastructure/Persistence/Migrations/20260627055838_Phase2SamlScimRbac.cs`
 
 ## Remaining Gaps for Next Iteration
 
-- full enterprise protocol parity (SAML/SCIM not yet included)
-- production-grade provider APIs (currently adapter scaffolding + config-driven pull stubs for directory sync)
-- admin RBAC fine-grained permissions
+- SAML assertion signing/encryption and metadata certificate rollover automation
+- SCIM PATCH filter semantics and bulk endpoint support
+- provider sandbox contract tests + retry/backoff + rate-limit governance
 - full end-to-end automated integration test suite with real provider sandbox credentials

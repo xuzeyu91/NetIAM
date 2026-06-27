@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using NetIAM.Domain.Entities;
 using NetIAM.Domain.Enums;
+using NetIAM.Infrastructure.Authorization;
 using NetIAM.Infrastructure.Persistence;
 using NetIAM.Infrastructure.Services;
 
@@ -21,6 +22,7 @@ public sealed class IdentityProvidersController(
         string ConfigJson);
 
     [HttpGet]
+    [RequirePermission("provider.read")]
     public async Task<IActionResult> List(CancellationToken cancellationToken)
     {
         var tenantId = tenantContextAccessor.GetTenantId();
@@ -33,6 +35,7 @@ public sealed class IdentityProvidersController(
     }
 
     [HttpPost]
+    [RequirePermission("provider.write")]
     public async Task<IActionResult> Create([FromBody] CreateIdentityProviderRequest request, CancellationToken cancellationToken)
     {
         var tenantId = tenantContextAccessor.GetTenantId();

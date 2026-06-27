@@ -35,3 +35,15 @@ public enum DataOriginType
     Feishu = 3,
     WeCom = 4
 }
+
+public enum PermissionGrantEffect
+{
+    Allow = 1,
+    Deny = 2
+}
+
+public enum SamlBindingType
+{
+    HttpPost = 1,
+    HttpRedirect = 2
+}

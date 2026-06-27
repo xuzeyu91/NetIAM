@@ -49,4 +49,4 @@
 ## Current Scope
 
 - implemented: local identity, provider adapters, account binding, pull/webhook sync foundation, OIDC server setup
-- planned hardening: full third-party API coverage, richer role/permission model, SCIM/SAML extensions
+- phase2 implemented: real provider API mode, fine-grained RBAC, SCIM 2.0 endpoints, SAML IdP metadata/SSO/ACS endpoints

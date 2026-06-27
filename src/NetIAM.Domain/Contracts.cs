@@ -43,3 +43,21 @@ public sealed record DirectoryNormalizedEvent(
     string EventType,
     string ExternalId,
     string PayloadJson);
+
+public sealed record SamlSsoRequest(
+    string TenantId,
+    string ServiceProviderCode,
+    string UserId,
+    string? RelayState);
+
+public sealed record SamlSsoResponse(
+    string Issuer,
+    string Destination,
+    string SubjectNameId,
+    string Audience,
+    string EncodedSamlResponse);
+
+public sealed record ScimPrincipalContext(
+    string TenantId,
+    string TokenName,
+    string? RequestId = null);

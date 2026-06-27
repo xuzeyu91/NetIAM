@@ -17,6 +17,7 @@ public sealed class NetIamDataSeeder(
     NetIamDbContext dbContext,
     UserManager<NetIamIdentityUser> userManager,
     RoleManager<IdentityRole> roleManager,
+    IRbacService rbacService,
     ILogger<NetIamDataSeeder> logger) : INetIamDataSeeder
 {
     private const string DefaultTenantId = "tenant-default";
@@ -42,38 +43,74 @@ public sealed class NetIamDataSeeder(
             await dbContext.SaveChangesAsync(cancellationToken);
         }
 
-        if (!await roleManager.RoleExistsAsync("Administrator"))
+        const string administratorRoleName = "Administrator";
+        if (!await roleManager.RoleExistsAsync(administratorRoleName))
         {
-            await roleManager.CreateAsync(new IdentityRole("Administrator"));
+            await roleManager.CreateAsync(new IdentityRole(administratorRoleName));
         }
 
         var admin = await userManager.Users
             .FirstOrDefaultAsync(x => x.TenantId == tenant.Id && x.UserName == DefaultAdminUsername, cancellationToken);
 
-        if (admin is not null)
+        if (admin is null)
         {
-            return;
+            admin = new NetIamIdentityUser
+            {
+                Id = "user-admin-default",
+                TenantId = tenant.Id,
+                UserName = DefaultAdminUsername,
+                DisplayName = "System Administrator",
+                Email = "admin@netiam.local",
+                EmailConfirmed = true,
+                DataOrigin = DataOriginType.Local
+            };
+
+            var createResult = await userManager.CreateAsync(admin, DefaultAdminPassword);
+            if (!createResult.Succeeded)
+            {
+                var errorMessages = string.Join("; ", createResult.Errors.Select(x => x.Description));
+                throw new InvalidOperationException($"Failed to seed admin user: {errorMessages}");
+            }
+
+            logger.LogInformation("Default admin user created. Username: {Username}", DefaultAdminUsername);
         }
 
-        admin = new NetIamIdentityUser
+        if (!await userManager.IsInRoleAsync(admin, administratorRoleName))
         {
-            Id = "user-admin-default",
-            TenantId = tenant.Id,
-            UserName = DefaultAdminUsername,
-            DisplayName = "System Administrator",
-            Email = "admin@netiam.local",
-            EmailConfirmed = true,
-            DataOrigin = DataOriginType.Local
-        };
-
-        var createResult = await userManager.CreateAsync(admin, DefaultAdminPassword);
-        if (!createResult.Succeeded)
-        {
-            var errorMessages = string.Join("; ", createResult.Errors.Select(x => x.Description));
-            throw new InvalidOperationException($"Failed to seed admin user: {errorMessages}");
+            await userManager.AddToRoleAsync(admin, administratorRoleName);
         }
 
-        await userManager.AddToRoleAsync(admin, "Administrator");
-        logger.LogInformation("Default admin user created. Username: {Username}", DefaultAdminUsername);
+        var permissions = GetDefaultPermissions();
+        foreach (var permission in permissions)
+        {
+            await rbacService.EnsurePermissionAsync(tenant.Id, permission, cancellationToken);
+            await rbacService.AssignPermissionToRoleAsync(tenant.Id, administratorRoleName, permission.Code, cancellationToken);
+        }
+    }
+
+    private static IReadOnlyCollection<PermissionDefinition> GetDefaultPermissions()
+    {
+        return
+        [
+            new("tenant.read", "Read Tenants", "tenant", "read"),
+            new("tenant.write", "Manage Tenants", "tenant", "write"),
+            new("user.read", "Read Users", "user", "read"),
+            new("user.write", "Manage Users", "user", "write"),
+            new("organization.read", "Read Organizations", "organization", "read"),
+            new("organization.write", "Manage Organizations", "organization", "write"),
+            new("provider.read", "Read Identity Providers", "identity_provider", "read"),
+            new("provider.write", "Manage Identity Providers", "identity_provider", "write"),
+            new("source.read", "Read Identity Sources", "identity_source", "read"),
+            new("source.write", "Manage Identity Sources", "identity_source", "write"),
+            new("app.read", "Read Applications", "application", "read"),
+            new("app.write", "Manage Applications", "application", "write"),
+            new("audit.read", "Read Audit Events", "audit", "read"),
+            new("rbac.read", "Read RBAC", "rbac", "read"),
+            new("rbac.write", "Manage RBAC", "rbac", "write"),
+            new("scim.read", "Read SCIM", "scim", "read"),
+            new("scim.write", "Manage SCIM", "scim", "write"),
+            new("saml.read", "Read SAML Config", "saml", "read"),
+            new("saml.write", "Manage SAML Config", "saml", "write")
+        ];
     }
 }

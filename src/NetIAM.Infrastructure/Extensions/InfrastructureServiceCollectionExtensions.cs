@@ -1,7 +1,9 @@
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using NetIAM.Infrastructure.Authorization;
 using NetIAM.Infrastructure.Identity;
 using NetIAM.Infrastructure.Persistence;
 using NetIAM.Infrastructure.Services;
@@ -43,6 +45,11 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IAuditService, AuditService>();
         services.AddScoped<IAccountBindingService, AccountBindingService>();
         services.AddScoped<IDirectorySyncService, DirectorySyncService>();
+        services.AddScoped<IRbacService, RbacService>();
+        services.AddScoped<IScimTokenService, ScimTokenService>();
+        services.AddScoped<ISamlService, SamlService>();
+        services.AddScoped<IAuthorizationHandler, RbacPermissionAuthorizationHandler>();
+        services.AddSingleton<IAuthorizationPolicyProvider, RbacPermissionPolicyProvider>();
         services.AddScoped<INetIamDataSeeder, NetIamDataSeeder>();
         return services;
     }

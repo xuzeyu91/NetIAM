@@ -14,15 +14,18 @@ public static class IntegrationServiceCollectionExtensions
         services.AddHttpClient<DingTalkAuthProviderHandler>();
         services.AddHttpClient<FeishuAuthProviderHandler>();
         services.AddHttpClient<WeComAuthProviderHandler>();
+        services.AddHttpClient<DingTalkDirectorySyncProvider>();
+        services.AddHttpClient<FeishuDirectorySyncProvider>();
+        services.AddHttpClient<WeComDirectorySyncProvider>();
 
-        services.AddScoped<IExternalAuthProviderHandler, DingTalkAuthProviderHandler>();
-        services.AddScoped<IExternalAuthProviderHandler, FeishuAuthProviderHandler>();
-        services.AddScoped<IExternalAuthProviderHandler, WeComAuthProviderHandler>();
+        services.AddScoped<IExternalAuthProviderHandler>(sp => sp.GetRequiredService<DingTalkAuthProviderHandler>());
+        services.AddScoped<IExternalAuthProviderHandler>(sp => sp.GetRequiredService<FeishuAuthProviderHandler>());
+        services.AddScoped<IExternalAuthProviderHandler>(sp => sp.GetRequiredService<WeComAuthProviderHandler>());
         services.AddScoped<IExternalAuthProviderFactory, ExternalAuthProviderFactory>();
 
-        services.AddScoped<IDirectorySyncProvider, DingTalkDirectorySyncProvider>();
-        services.AddScoped<IDirectorySyncProvider, FeishuDirectorySyncProvider>();
-        services.AddScoped<IDirectorySyncProvider, WeComDirectorySyncProvider>();
+        services.AddScoped<IDirectorySyncProvider>(sp => sp.GetRequiredService<DingTalkDirectorySyncProvider>());
+        services.AddScoped<IDirectorySyncProvider>(sp => sp.GetRequiredService<FeishuDirectorySyncProvider>());
+        services.AddScoped<IDirectorySyncProvider>(sp => sp.GetRequiredService<WeComDirectorySyncProvider>());
         services.AddScoped<IDirectorySyncProviderFactory, DirectorySyncProviderFactory>();
 
         return services;

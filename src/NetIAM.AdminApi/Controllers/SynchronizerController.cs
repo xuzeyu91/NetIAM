@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using NetIAM.Infrastructure.Authorization;
 using NetIAM.Infrastructure.Services;
 
 namespace NetIAM.AdminApi.Controllers;
@@ -10,6 +11,7 @@ public sealed class SynchronizerController(
     IDirectorySyncService directorySyncService) : ControllerBase
 {
     [HttpPost("{code}")]
+    [RequirePermission("source.write")]
     public async Task<IActionResult> Receive(string code, CancellationToken cancellationToken)
     {
         using var reader = new StreamReader(Request.Body);

@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using NetIAM.Domain.Entities;
+using NetIAM.Infrastructure.Authorization;
 using NetIAM.Infrastructure.Persistence;
 using NetIAM.Infrastructure.Services;
 
@@ -16,6 +17,7 @@ public sealed class AppsController(
     public sealed record CreateAppRequest(string Code, string Name, string Protocol);
 
     [HttpGet]
+    [RequirePermission("app.read")]
     public async Task<IActionResult> List(CancellationToken cancellationToken)
     {
         var tenantId = tenantContextAccessor.GetTenantId();
@@ -27,6 +29,7 @@ public sealed class AppsController(
     }
 
     [HttpPost]
+    [RequirePermission("app.write")]
     public async Task<IActionResult> Create([FromBody] CreateAppRequest request, CancellationToken cancellationToken)
     {
         var tenantId = tenantContextAccessor.GetTenantId();

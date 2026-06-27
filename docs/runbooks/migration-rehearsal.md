@@ -53,7 +53,16 @@ Validate that NetIAM can complete an end-to-end rehearsal from empty database to
    - send webhook payload to `POST /api/v1/synchronizer/event/{code}`
    - check audit and sync records
 
-8. Validate frontend builds:
+8. Validate RBAC / SAML / SCIM phase2:
+   - query permissions: `GET /api/admin/rbac/permissions`
+   - create SCIM token: `POST /api/admin/scim/tokens`
+   - call `GET /scim/v2/Users` with `Authorization: Bearer <token>`
+   - configure SAML SP and validate:
+     - `POST /api/admin/saml/service-providers`
+     - `GET /saml2/metadata/{tenantId}`
+     - `GET /saml2/sso/{serviceProviderCode}?userId={userId}`
+
+9. Validate frontend builds:
 
    ```bash
    cd web/admin && npm run build
@@ -67,4 +76,7 @@ Validate that NetIAM can complete an end-to-end rehearsal from empty database to
 - user/provider/source CRUD works from admin APIs
 - callback and bind flow returns expected status
 - sync trigger and webhook endpoint write records
+- RBAC permission policy checks are effective on admin endpoints
+- SCIM token auth and Users/Groups endpoints work
+- SAML metadata and SSO endpoint return valid payloads
 - both frontends build successfully

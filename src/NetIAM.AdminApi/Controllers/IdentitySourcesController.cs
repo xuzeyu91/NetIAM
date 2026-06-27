@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using NetIAM.Domain.Entities;
 using NetIAM.Domain.Enums;
+using NetIAM.Infrastructure.Authorization;
 using NetIAM.Infrastructure.Persistence;
 using NetIAM.Infrastructure.Services;
 
@@ -24,6 +25,7 @@ public sealed class IdentitySourcesController(
         string? JobConfigJson = null);
 
     [HttpGet]
+    [RequirePermission("source.read")]
     public async Task<IActionResult> List(CancellationToken cancellationToken)
     {
         var tenantId = tenantContextAccessor.GetTenantId();
@@ -36,6 +38,7 @@ public sealed class IdentitySourcesController(
     }
 
     [HttpPost]
+    [RequirePermission("source.write")]
     public async Task<IActionResult> Create([FromBody] CreateIdentitySourceRequest request, CancellationToken cancellationToken)
     {
         var tenantId = tenantContextAccessor.GetTenantId();
@@ -64,6 +67,7 @@ public sealed class IdentitySourcesController(
     }
 
     [HttpPost("{code}/sync")]
+    [RequirePermission("source.write")]
     public async Task<IActionResult> RunSync(string code, CancellationToken cancellationToken)
     {
         var tenantId = tenantContextAccessor.GetTenantId();
