@@ -20,7 +20,8 @@ public sealed class IdentityProvidersController(
         string Code,
         string Name,
         ExternalProviderType ProviderType,
-        string? ConfigJson);
+        string? ConfigJson,
+        bool Enabled = true);
 
     public sealed record UpdateIdentityProviderRequest(
         string Name,
@@ -65,7 +66,7 @@ public sealed class IdentityProvidersController(
             Name = request.Name,
             ProviderType = request.ProviderType,
             ConfigJson = normalizedConfig,
-            Enabled = true
+            Enabled = request.Enabled
         };
         dbContext.IdentityProviders.Add(entity);
         await dbContext.SaveChangesAsync(cancellationToken);

@@ -23,7 +23,8 @@ public sealed class IdentitySourcesController(
         IdentitySourceProviderType ProviderType,
         string? BasicConfigJson,
         string? StrategyConfigJson = null,
-        string? JobConfigJson = null);
+        string? JobConfigJson = null,
+        bool Enabled = true);
 
     public sealed record UpdateIdentitySourceRequest(
         string Name,
@@ -79,7 +80,7 @@ public sealed class IdentitySourcesController(
             Code = request.Code,
             Name = request.Name,
             ProviderType = request.ProviderType,
-            Enabled = true,
+            Enabled = request.Enabled,
             BasicConfigJson = basicConfig,
             StrategyConfigJson = JsonSerializer.Serialize(strategyConfigElement),
             JobConfigJson = JsonSerializer.Serialize(jobConfigElement)

@@ -82,6 +82,12 @@
   margin: 0 0 0.8rem 0;
 }
 
+.section-hint {
+  margin: -0.25rem 0 0.8rem 0;
+  color: #94a3b8;
+  font-size: 0.86rem;
+}
+
 .inline-form {
   display: flex;
   gap: 0.55rem;
@@ -115,6 +121,19 @@
   margin-bottom: 0.8rem;
 }
 
+.create-section {
+  background: #0f172a;
+  border: 1px solid #1f2937;
+  border-radius: 10px;
+  padding: 0.75rem;
+}
+
+.create-section h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  color: #bfdbfe;
+}
+
 .config-form .inline-form {
   margin-bottom: 0;
 }
@@ -135,6 +154,103 @@
   gap: 0.5rem;
   color: #cbd5e1;
   font-size: 0.9rem;
+}
+
+.detail-layout {
+  display: grid;
+  grid-template-columns: minmax(300px, 1fr) minmax(420px, 1.2fr);
+  gap: 0.8rem;
+}
+
+.list-panel,
+.detail-panel {
+  background: #0f172a;
+  border: 1px solid #1f2937;
+  border-radius: 10px;
+  padding: 0.75rem;
+}
+
+.list-panel h3,
+.detail-panel h3 {
+  margin: 0 0 0.55rem 0;
+  font-size: 0.95rem;
+  color: #bfdbfe;
+}
+
+.clickable-row {
+  cursor: pointer;
+}
+
+.clickable-row:hover td {
+  background: #111f35;
+}
+
+.active-row td {
+  background: #082f49;
+}
+
+.empty-cell,
+.empty-hint {
+  color: #94a3b8;
+}
+
+.readonly-input {
+  opacity: 0.75;
+}
+
+.field-label {
+  color: #cbd5e1;
+  font-size: 0.85rem;
+}
+
+.json-editor {
+  border-radius: 8px;
+  border: 1px solid #334155;
+  background: #111827;
+  color: #e2e8f0;
+  padding: 0.5rem 0.6rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.json-preview {
+  margin: 0;
+  border: 1px solid #334155;
+  background: #111827;
+  color: #cbd5e1;
+  border-radius: 8px;
+  padding: 0.55rem;
+  font-size: 0.78rem;
+  max-height: 190px;
+  overflow: auto;
+}
+
+.action-row {
+  display: flex;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+}
+
+.action-row button {
+  border: 0;
+  border-radius: 8px;
+  padding: 0.45rem 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.action-row .secondary-btn {
+  background: #334155;
+  color: #e2e8f0;
+}
+
+.action-row .info-btn {
+  background: #0ea5e9;
+  color: #082f49;
+}
+
+.action-row .danger-btn {
+  background: #b91c1c;
+  color: #fee2e2;
 }
 
 table {
