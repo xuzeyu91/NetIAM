@@ -36,13 +36,19 @@
 - `dotnet build src/NetIAM.sln` passes
 - `npm run build` passes for `web/admin` and `web/portal`
 - admin closure milestone delivered:
-  - `web/admin` now covers tenant/user/user-group/organization/app/access-policy/provider/source/rbac/saml/scim/audit tabs
+  - `web/admin` now covers tenant/user/user-group/organization/app/access-policy/security/settings/monitor/provider/source/rbac/saml/scim/audit tabs
   - request context supports `X-Tenant-Id` + `X-Acting-User-Id` + optional bearer token
   - users upgraded from read-only to full CRUD UX
 - phase2 admin modules delivered:
   - admin user-group APIs (`/api/admin/user-groups`) with member replacement
   - admin app-access-policy APIs (`/api/admin/app-access-policies`) with subject validation
   - admin UI wiring for user-group and app-access-policy management
+- phase3 admin modules delivered:
+  - security settings APIs (`/api/admin/security/basic|password-policy|defense-policy`)
+  - administrator management APIs (`/api/admin/security/administrators`)
+  - system settings APIs (`/api/admin/settings/message|storage|geoip`)
+  - monitor session APIs (`/api/admin/monitor/sessions`) with revocation marker support
+  - tenant-scoped system setting persistence table `eiam_system_setting`
 - admin backend minimal CRUD gaps closed:
   - tenants support update/delete
   - organizations support update/delete with tree-path rebuild and child-delete guard
@@ -53,12 +59,12 @@
 - EF migration generated successfully:
   - `src/NetIAM.Infrastructure/Persistence/Migrations/20260627053351_InitialCoreSchema.cs`
   - `src/NetIAM.Infrastructure/Persistence/Migrations/20260627055838_Phase2SamlScimRbac.cs`
+  - `src/NetIAM.Infrastructure/Persistence/Migrations/20260627103708_Phase3SecuritySettingsMonitor.cs`
 
 ## Remaining Gaps for Next Iteration
 
 - admin modules not yet aligned to eiam console breadth:
-  - security settings (password policy / defense policy / administrator management)
-  - monitor/session management and system setting modules (message/geoip/storage)
+  - monitor session force-logout is currently a revocation marker (not yet protocol-level hard logout)
 - identity source sync history/record query APIs and admin UI
 - SAML assertion signing/encryption and metadata certificate rollover automation
 - SCIM PATCH filter semantics and bulk endpoint support

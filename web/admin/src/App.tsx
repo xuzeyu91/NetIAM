@@ -11,6 +11,9 @@ type AdminTab =
   | 'organizations'
   | 'apps'
   | 'accessPolicies'
+  | 'security'
+  | 'settings'
+  | 'monitor'
   | 'providers'
   | 'sources'
   | 'rbac'
@@ -151,6 +154,85 @@ type AppAccessPolicyItem = {
   updateTime?: string
 }
 
+type SecurityBasicSettings = {
+  sessionTimeoutMinutes: number
+  sessionMaximum: number
+  rememberMeEnabled: boolean
+  rememberMeDays: number
+  captchaEnabled: boolean
+  captchaTtlSeconds: number
+  allowMultipleSessions: boolean
+}
+
+type PasswordPolicySettings = {
+  requiredLength: number
+  requireDigit: boolean
+  requireLowercase: boolean
+  requireUppercase: boolean
+  requireNonAlphanumeric: boolean
+  passwordHistoryCount: number
+  passwordMaxAgeDays: number
+  enableWeakPasswordCheck: boolean
+}
+
+type DefensePolicySettings = {
+  maxFailedAttempts: number
+  lockoutMinutes: number
+  autoUnlockMinutes: number
+  enableIpRateLimit: boolean
+  enableRiskAudit: boolean
+}
+
+type AdministratorItem = {
+  id: string
+  userName: string
+  displayName: string
+  email?: string
+  phoneNumber?: string
+}
+
+type MessageSettings = {
+  emailProvider: string
+  emailFromAddress: string
+  emailHost: string
+  emailPort: number
+  emailUseSsl: boolean
+  smsProvider: string
+  smsSignName: string
+  smsTemplateCode: string
+  mailTemplate: string
+  smsTemplate: string
+}
+
+type StorageSettings = {
+  provider: string
+  endpoint: string
+  bucket: string
+  accessKeyId: string
+  secretAccessKey: string
+  region: string
+}
+
+type GeoIpSettings = {
+  enabled: boolean
+  provider: string
+  databasePath: string
+  apiEndpoint: string
+  apiToken: string
+}
+
+type MonitorSessionItem = {
+  sessionId: string
+  userId?: string
+  userName?: string
+  eventType: string
+  resultStatus: string
+  ipAddress?: string
+  userAgent?: string
+  occurredTime: string
+  revoked: boolean
+}
+
 type AuditItem = {
   id: string
   eventType: string
@@ -287,6 +369,9 @@ const tabs: Array<{ id: AdminTab; label: string }> = [
   { id: 'organizations', label: 'Organizations' },
   { id: 'apps', label: 'Apps' },
   { id: 'accessPolicies', label: 'Access Policies' },
+  { id: 'security', label: 'Security' },
+  { id: 'settings', label: 'Settings' },
+  { id: 'monitor', label: 'Monitor' },
   { id: 'providers', label: 'Identity Providers' },
   { id: 'sources', label: 'Identity Sources' },
   { id: 'rbac', label: 'RBAC' },
@@ -780,6 +865,77 @@ function normalizeUserIdList(rawText: string): string[] {
     .filter((item, index, values) => values.indexOf(item) === index)
 }
 
+function createDefaultSecurityBasicSettings(): SecurityBasicSettings {
+  return {
+    sessionTimeoutMinutes: 480,
+    sessionMaximum: 5,
+    rememberMeEnabled: true,
+    rememberMeDays: 14,
+    captchaEnabled: false,
+    captchaTtlSeconds: 300,
+    allowMultipleSessions: true,
+  }
+}
+
+function createDefaultPasswordPolicySettings(): PasswordPolicySettings {
+  return {
+    requiredLength: 12,
+    requireDigit: true,
+    requireLowercase: true,
+    requireUppercase: true,
+    requireNonAlphanumeric: true,
+    passwordHistoryCount: 5,
+    passwordMaxAgeDays: 90,
+    enableWeakPasswordCheck: true,
+  }
+}
+
+function createDefaultDefensePolicySettings(): DefensePolicySettings {
+  return {
+    maxFailedAttempts: 5,
+    lockoutMinutes: 15,
+    autoUnlockMinutes: 15,
+    enableIpRateLimit: true,
+    enableRiskAudit: true,
+  }
+}
+
+function createDefaultMessageSettings(): MessageSettings {
+  return {
+    emailProvider: 'smtp',
+    emailFromAddress: '',
+    emailHost: '',
+    emailPort: 465,
+    emailUseSsl: true,
+    smsProvider: 'none',
+    smsSignName: '',
+    smsTemplateCode: '',
+    mailTemplate: '',
+    smsTemplate: '',
+  }
+}
+
+function createDefaultStorageSettings(): StorageSettings {
+  return {
+    provider: 'local',
+    endpoint: '',
+    bucket: '',
+    accessKeyId: '',
+    secretAccessKey: '',
+    region: '',
+  }
+}
+
+function createDefaultGeoIpSettings(): GeoIpSettings {
+  return {
+    enabled: false,
+    provider: 'builtin',
+    databasePath: '',
+    apiEndpoint: '',
+    apiToken: '',
+  }
+}
+
 function App() {
   const [requestContext, setRequestContext] = useState<RequestContext>(() => createInitialRequestContext())
   const [activeTab, setActiveTab] = useState<AdminTab>('tenants')
@@ -799,6 +955,20 @@ function App() {
   const [scimTokens, setScimTokens] = useState<ScimTokenItem[]>([])
   const [userGroups, setUserGroups] = useState<UserGroupItem[]>([])
   const [appAccessPolicies, setAppAccessPolicies] = useState<AppAccessPolicyItem[]>([])
+  const [securityBasicSettings, setSecurityBasicSettings] = useState<SecurityBasicSettings>(() =>
+    createDefaultSecurityBasicSettings(),
+  )
+  const [passwordPolicySettings, setPasswordPolicySettings] = useState<PasswordPolicySettings>(() =>
+    createDefaultPasswordPolicySettings(),
+  )
+  const [defensePolicySettings, setDefensePolicySettings] = useState<DefensePolicySettings>(() =>
+    createDefaultDefensePolicySettings(),
+  )
+  const [administrators, setAdministrators] = useState<AdministratorItem[]>([])
+  const [messageSettings, setMessageSettings] = useState<MessageSettings>(() => createDefaultMessageSettings())
+  const [storageSettings, setStorageSettings] = useState<StorageSettings>(() => createDefaultStorageSettings())
+  const [geoIpSettings, setGeoIpSettings] = useState<GeoIpSettings>(() => createDefaultGeoIpSettings())
+  const [monitorSessions, setMonitorSessions] = useState<MonitorSessionItem[]>([])
   const [audits, setAudits] = useState<AuditItem[]>([])
 
   const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null)
@@ -810,6 +980,7 @@ function App() {
   const [selectedProviderCode, setSelectedProviderCode] = useState<string | null>(null)
   const [selectedSourceCode, setSelectedSourceCode] = useState<string | null>(null)
   const [selectedSamlCode, setSelectedSamlCode] = useState<string | null>(null)
+  const [newAdministratorUserId, setNewAdministratorUserId] = useState('')
 
   const [tenantCreate, setTenantCreate] = useState<TenantDraft>(() => createDefaultTenantDraft())
   const [tenantEdit, setTenantEdit] = useState<TenantDraft | null>(null)
@@ -934,6 +1105,11 @@ function App() {
     return users.map((user) => ({ id: user.id, label: `${user.userName} (${user.displayName})` }))
   }, [accessPolicyEdit, organizations, userGroups, users])
 
+  const administratorUserIdSet = useMemo(
+    () => new Set(administrators.map((administrator) => administrator.id)),
+    [administrators],
+  )
+
   useEffect(() => {
     persistRequestContext(requestContext)
   }, [requestContext])
@@ -969,6 +1145,14 @@ function App() {
         roleData,
         samlData,
         scimData,
+        securityBasicData,
+        passwordPolicyData,
+        defensePolicyData,
+        administratorData,
+        messageSettingData,
+        storageSettingData,
+        geoIpSettingData,
+        monitorSessionData,
         auditData,
       ] = await Promise.all([
         requestJson<TenantItem[]>(requestContext, '/api/admin/tenants'),
@@ -983,6 +1167,14 @@ function App() {
         requestJson<RoleItem[]>(requestContext, '/api/admin/rbac/roles'),
         requestJson<SamlServiceProviderItem[]>(requestContext, '/api/admin/saml/service-providers'),
         requestJson<ScimTokenItem[]>(requestContext, '/api/admin/scim/tokens'),
+        requestJson<SecurityBasicSettings>(requestContext, '/api/admin/security/basic'),
+        requestJson<PasswordPolicySettings>(requestContext, '/api/admin/security/password-policy'),
+        requestJson<DefensePolicySettings>(requestContext, '/api/admin/security/defense-policy'),
+        requestJson<AdministratorItem[]>(requestContext, '/api/admin/security/administrators'),
+        requestJson<MessageSettings>(requestContext, '/api/admin/settings/message'),
+        requestJson<StorageSettings>(requestContext, '/api/admin/settings/storage'),
+        requestJson<GeoIpSettings>(requestContext, '/api/admin/settings/geoip'),
+        requestJson<MonitorSessionItem[]>(requestContext, '/api/admin/monitor/sessions?take=100'),
         requestJson<AuditItem[]>(requestContext, '/api/admin/audit?take=100'),
       ])
 
@@ -998,6 +1190,14 @@ function App() {
       setRoles(roleData)
       setSamlProviders(samlData)
       setScimTokens(scimData)
+      setSecurityBasicSettings(securityBasicData)
+      setPasswordPolicySettings(passwordPolicyData)
+      setDefensePolicySettings(defensePolicyData)
+      setAdministrators(administratorData)
+      setMessageSettings(messageSettingData)
+      setStorageSettings(storageSettingData)
+      setGeoIpSettings(geoIpSettingData)
+      setMonitorSessions(monitorSessionData)
       setAudits(auditData)
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Failed to load admin data.')
@@ -1202,6 +1402,12 @@ function App() {
   }, [userGrantDraft.userId, users])
 
   useEffect(() => {
+    if (!newAdministratorUserId && users.length > 0) {
+      setNewAdministratorUserId(users[0].id)
+    }
+  }, [newAdministratorUserId, users])
+
+  useEffect(() => {
     if (!accessPolicyCreate.appId && apps.length > 0) {
       setAccessPolicyCreate((previous) => ({ ...previous, appId: apps[0].id }))
     }
@@ -1283,6 +1489,33 @@ function App() {
 
   function updateAccessPolicyEdit<K extends keyof AppAccessPolicyDraft>(key: K, value: AppAccessPolicyDraft[K]) {
     setAccessPolicyEdit((previous) => (previous ? { ...previous, [key]: value } : previous))
+  }
+
+  function updateSecurityBasicSettings<K extends keyof SecurityBasicSettings>(key: K, value: SecurityBasicSettings[K]) {
+    setSecurityBasicSettings((previous) => ({ ...previous, [key]: value }))
+  }
+
+  function updatePasswordPolicySettings<K extends keyof PasswordPolicySettings>(
+    key: K,
+    value: PasswordPolicySettings[K],
+  ) {
+    setPasswordPolicySettings((previous) => ({ ...previous, [key]: value }))
+  }
+
+  function updateDefensePolicySettings<K extends keyof DefensePolicySettings>(key: K, value: DefensePolicySettings[K]) {
+    setDefensePolicySettings((previous) => ({ ...previous, [key]: value }))
+  }
+
+  function updateMessageSettings<K extends keyof MessageSettings>(key: K, value: MessageSettings[K]) {
+    setMessageSettings((previous) => ({ ...previous, [key]: value }))
+  }
+
+  function updateStorageSettings<K extends keyof StorageSettings>(key: K, value: StorageSettings[K]) {
+    setStorageSettings((previous) => ({ ...previous, [key]: value }))
+  }
+
+  function updateGeoIpSettings<K extends keyof GeoIpSettings>(key: K, value: GeoIpSettings[K]) {
+    setGeoIpSettings((previous) => ({ ...previous, [key]: value }))
   }
 
   function updateProviderCreate<K extends keyof ProviderDraft>(key: K, value: ProviderDraft[K]) {
@@ -1743,6 +1976,131 @@ function App() {
       setSuccess('Access policy deleted.')
       await refreshAll()
     }, 'Failed to delete access policy.')
+  }
+
+  async function handleSaveSecurityBasicSettings(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    await runMutation(async () => {
+      await requestJson<SecurityBasicSettings>(requestContext, '/api/admin/security/basic', {
+        method: 'PUT',
+        body: JSON.stringify(securityBasicSettings),
+      })
+      setSuccess('Security basic settings updated.')
+      await refreshAll()
+    }, 'Failed to update security basic settings.')
+  }
+
+  async function handleSavePasswordPolicySettings(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    await runMutation(async () => {
+      await requestJson<PasswordPolicySettings>(requestContext, '/api/admin/security/password-policy', {
+        method: 'PUT',
+        body: JSON.stringify(passwordPolicySettings),
+      })
+      setSuccess('Password policy updated.')
+      await refreshAll()
+    }, 'Failed to update password policy.')
+  }
+
+  async function handleSaveDefensePolicySettings(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    await runMutation(async () => {
+      await requestJson<DefensePolicySettings>(requestContext, '/api/admin/security/defense-policy', {
+        method: 'PUT',
+        body: JSON.stringify(defensePolicySettings),
+      })
+      setSuccess('Defense policy updated.')
+      await refreshAll()
+    }, 'Failed to update defense policy.')
+  }
+
+  async function handleAddAdministrator() {
+    if (!newAdministratorUserId) {
+      setError('Please select a user to grant administrator role.')
+      return
+    }
+
+    await runMutation(async () => {
+      await requestJson<unknown>(
+        requestContext,
+        `/api/admin/security/administrators/${encodeURIComponent(newAdministratorUserId)}`,
+        { method: 'POST' },
+      )
+      setSuccess('Administrator granted.')
+      await refreshAll()
+    }, 'Failed to add administrator.')
+  }
+
+  async function handleRemoveAdministrator(administrator: AdministratorItem) {
+    if (!window.confirm(`Remove administrator role from ${administrator.userName}?`)) {
+      return
+    }
+
+    await runMutation(async () => {
+      await requestJson<unknown>(
+        requestContext,
+        `/api/admin/security/administrators/${encodeURIComponent(administrator.id)}`,
+        { method: 'DELETE' },
+      )
+      setSuccess(`Administrator ${administrator.userName} removed.`)
+      await refreshAll()
+    }, 'Failed to remove administrator.')
+  }
+
+  async function handleSaveMessageSettings(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    await runMutation(async () => {
+      await requestJson<MessageSettings>(requestContext, '/api/admin/settings/message', {
+        method: 'PUT',
+        body: JSON.stringify(messageSettings),
+      })
+      setSuccess('Message settings updated.')
+      await refreshAll()
+    }, 'Failed to update message settings.')
+  }
+
+  async function handleSaveStorageSettings(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    await runMutation(async () => {
+      await requestJson<StorageSettings>(requestContext, '/api/admin/settings/storage', {
+        method: 'PUT',
+        body: JSON.stringify(storageSettings),
+      })
+      setSuccess('Storage settings updated.')
+      await refreshAll()
+    }, 'Failed to update storage settings.')
+  }
+
+  async function handleSaveGeoIpSettings(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    await runMutation(async () => {
+      await requestJson<GeoIpSettings>(requestContext, '/api/admin/settings/geoip', {
+        method: 'PUT',
+        body: JSON.stringify(geoIpSettings),
+      })
+      setSuccess('GeoIP settings updated.')
+      await refreshAll()
+    }, 'Failed to update GeoIP settings.')
+  }
+
+  async function handleRevokeMonitorSession(session: MonitorSessionItem) {
+    if (session.revoked) {
+      return
+    }
+
+    if (!window.confirm(`Mark session ${session.sessionId} as revoked?`)) {
+      return
+    }
+
+    await runMutation(async () => {
+      await requestJson<unknown>(
+        requestContext,
+        `/api/admin/monitor/sessions/${encodeURIComponent(session.sessionId)}/revoke`,
+        { method: 'POST' },
+      )
+      setSuccess(`Session ${session.sessionId} marked as revoked.`)
+      await refreshAll()
+    }, 'Failed to revoke session.')
   }
 
   async function handleCreateProvider(event: FormEvent<HTMLFormElement>) {
@@ -3069,6 +3427,472 @@ function App() {
                 )}
               </section>
             </div>
+          </div>
+        )}
+
+        {activeTab === 'security' && (
+          <div className="panel">
+            <h2>Security</h2>
+            <p className="section-hint">Manage basic security controls, password policy, defense strategy, and administrators.</p>
+
+            <div className="detail-layout">
+              <section className="list-panel">
+                <form onSubmit={handleSaveSecurityBasicSettings} className="config-form create-section">
+                  <h3>Basic Security</h3>
+                  <div className="inline-form">
+                    <input
+                      type="number"
+                      min={5}
+                      value={securityBasicSettings.sessionTimeoutMinutes}
+                      onChange={(event) => updateSecurityBasicSettings('sessionTimeoutMinutes', Number(event.target.value))}
+                      placeholder="Session Timeout (minutes)"
+                      required
+                    />
+                    <input
+                      type="number"
+                      min={1}
+                      value={securityBasicSettings.sessionMaximum}
+                      onChange={(event) => updateSecurityBasicSettings('sessionMaximum', Number(event.target.value))}
+                      placeholder="Session Maximum"
+                      required
+                    />
+                    <input
+                      type="number"
+                      min={1}
+                      value={securityBasicSettings.rememberMeDays}
+                      onChange={(event) => updateSecurityBasicSettings('rememberMeDays', Number(event.target.value))}
+                      placeholder="RememberMe Days"
+                      required
+                    />
+                  </div>
+                  <div className="inline-form">
+                    <input
+                      type="number"
+                      min={30}
+                      value={securityBasicSettings.captchaTtlSeconds}
+                      onChange={(event) => updateSecurityBasicSettings('captchaTtlSeconds', Number(event.target.value))}
+                      placeholder="Captcha TTL (seconds)"
+                      required
+                    />
+                    <label className="checkbox-row">
+                      <input
+                        type="checkbox"
+                        checked={securityBasicSettings.rememberMeEnabled}
+                        onChange={(event) => updateSecurityBasicSettings('rememberMeEnabled', event.target.checked)}
+                      />
+                      Remember Me Enabled
+                    </label>
+                    <label className="checkbox-row">
+                      <input
+                        type="checkbox"
+                        checked={securityBasicSettings.captchaEnabled}
+                        onChange={(event) => updateSecurityBasicSettings('captchaEnabled', event.target.checked)}
+                      />
+                      Captcha Enabled
+                    </label>
+                    <label className="checkbox-row">
+                      <input
+                        type="checkbox"
+                        checked={securityBasicSettings.allowMultipleSessions}
+                        onChange={(event) => updateSecurityBasicSettings('allowMultipleSessions', event.target.checked)}
+                      />
+                      Allow Multiple Sessions
+                    </label>
+                    <button type="submit">Save</button>
+                  </div>
+                </form>
+
+                <form onSubmit={handleSavePasswordPolicySettings} className="config-form create-section">
+                  <h3>Password Policy</h3>
+                  <div className="inline-form">
+                    <input
+                      type="number"
+                      min={8}
+                      value={passwordPolicySettings.requiredLength}
+                      onChange={(event) => updatePasswordPolicySettings('requiredLength', Number(event.target.value))}
+                      placeholder="Required Length"
+                      required
+                    />
+                    <input
+                      type="number"
+                      min={0}
+                      value={passwordPolicySettings.passwordHistoryCount}
+                      onChange={(event) => updatePasswordPolicySettings('passwordHistoryCount', Number(event.target.value))}
+                      placeholder="History Count"
+                      required
+                    />
+                    <input
+                      type="number"
+                      min={0}
+                      value={passwordPolicySettings.passwordMaxAgeDays}
+                      onChange={(event) => updatePasswordPolicySettings('passwordMaxAgeDays', Number(event.target.value))}
+                      placeholder="Max Age Days"
+                      required
+                    />
+                  </div>
+                  <div className="inline-form">
+                    <label className="checkbox-row">
+                      <input
+                        type="checkbox"
+                        checked={passwordPolicySettings.requireDigit}
+                        onChange={(event) => updatePasswordPolicySettings('requireDigit', event.target.checked)}
+                      />
+                      Require Digit
+                    </label>
+                    <label className="checkbox-row">
+                      <input
+                        type="checkbox"
+                        checked={passwordPolicySettings.requireLowercase}
+                        onChange={(event) => updatePasswordPolicySettings('requireLowercase', event.target.checked)}
+                      />
+                      Require Lowercase
+                    </label>
+                    <label className="checkbox-row">
+                      <input
+                        type="checkbox"
+                        checked={passwordPolicySettings.requireUppercase}
+                        onChange={(event) => updatePasswordPolicySettings('requireUppercase', event.target.checked)}
+                      />
+                      Require Uppercase
+                    </label>
+                    <label className="checkbox-row">
+                      <input
+                        type="checkbox"
+                        checked={passwordPolicySettings.requireNonAlphanumeric}
+                        onChange={(event) => updatePasswordPolicySettings('requireNonAlphanumeric', event.target.checked)}
+                      />
+                      Require Non-alphanumeric
+                    </label>
+                    <label className="checkbox-row">
+                      <input
+                        type="checkbox"
+                        checked={passwordPolicySettings.enableWeakPasswordCheck}
+                        onChange={(event) => updatePasswordPolicySettings('enableWeakPasswordCheck', event.target.checked)}
+                      />
+                      Weak Password Check
+                    </label>
+                    <button type="submit">Save</button>
+                  </div>
+                </form>
+
+                <form onSubmit={handleSaveDefensePolicySettings} className="config-form create-section">
+                  <h3>Defense Policy</h3>
+                  <div className="inline-form">
+                    <input
+                      type="number"
+                      min={1}
+                      value={defensePolicySettings.maxFailedAttempts}
+                      onChange={(event) => updateDefensePolicySettings('maxFailedAttempts', Number(event.target.value))}
+                      placeholder="Max Failed Attempts"
+                      required
+                    />
+                    <input
+                      type="number"
+                      min={1}
+                      value={defensePolicySettings.lockoutMinutes}
+                      onChange={(event) => updateDefensePolicySettings('lockoutMinutes', Number(event.target.value))}
+                      placeholder="Lockout Minutes"
+                      required
+                    />
+                    <input
+                      type="number"
+                      min={1}
+                      value={defensePolicySettings.autoUnlockMinutes}
+                      onChange={(event) => updateDefensePolicySettings('autoUnlockMinutes', Number(event.target.value))}
+                      placeholder="Auto Unlock Minutes"
+                      required
+                    />
+                  </div>
+                  <div className="inline-form">
+                    <label className="checkbox-row">
+                      <input
+                        type="checkbox"
+                        checked={defensePolicySettings.enableIpRateLimit}
+                        onChange={(event) => updateDefensePolicySettings('enableIpRateLimit', event.target.checked)}
+                      />
+                      Enable IP Rate Limit
+                    </label>
+                    <label className="checkbox-row">
+                      <input
+                        type="checkbox"
+                        checked={defensePolicySettings.enableRiskAudit}
+                        onChange={(event) => updateDefensePolicySettings('enableRiskAudit', event.target.checked)}
+                      />
+                      Enable Risk Audit
+                    </label>
+                    <button type="submit">Save</button>
+                  </div>
+                </form>
+              </section>
+
+              <section className="detail-panel">
+                <h3>Administrators</h3>
+                <div className="inline-form">
+                  <select value={newAdministratorUserId} onChange={(event) => setNewAdministratorUserId(event.target.value)}>
+                    <option value="">Select user</option>
+                    {users.map((user) => (
+                      <option key={user.id} value={user.id}>
+                        {user.userName} ({user.displayName})
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => void handleAddAdministrator()}
+                    disabled={!newAdministratorUserId || administratorUserIdSet.has(newAdministratorUserId)}
+                  >
+                    Grant Administrator
+                  </button>
+                </div>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Username</th>
+                      <th>Display Name</th>
+                      <th>Email</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {administrators.length === 0 && (
+                      <tr>
+                        <td colSpan={4} className="empty-cell">
+                          No administrators found.
+                        </td>
+                      </tr>
+                    )}
+                    {administrators.map((administrator) => (
+                      <tr key={administrator.id}>
+                        <td>{administrator.userName}</td>
+                        <td>{administrator.displayName}</td>
+                        <td>{optionOrDash(administrator.email)}</td>
+                        <td>
+                          <button
+                            className="danger-btn"
+                            onClick={() => void handleRemoveAdministrator(administrator)}
+                            disabled={administrators.length <= 1}
+                          >
+                            Remove
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <p className="config-note">At least one administrator must remain in the tenant.</p>
+              </section>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'settings' && (
+          <div className="panel">
+            <h2>System Settings</h2>
+            <p className="section-hint">Configure message delivery, storage backend, and GeoIP source.</p>
+
+            <div className="detail-layout">
+              <section className="list-panel">
+                <form onSubmit={handleSaveMessageSettings} className="config-form create-section">
+                  <h3>Message Settings</h3>
+                  <div className="inline-form">
+                    <input
+                      placeholder="Email Provider"
+                      value={messageSettings.emailProvider}
+                      onChange={(event) => updateMessageSettings('emailProvider', event.target.value)}
+                      required
+                    />
+                    <input
+                      placeholder="Email From Address"
+                      value={messageSettings.emailFromAddress}
+                      onChange={(event) => updateMessageSettings('emailFromAddress', event.target.value)}
+                    />
+                    <input
+                      placeholder="Email Host"
+                      value={messageSettings.emailHost}
+                      onChange={(event) => updateMessageSettings('emailHost', event.target.value)}
+                    />
+                    <input
+                      type="number"
+                      min={1}
+                      value={messageSettings.emailPort}
+                      onChange={(event) => updateMessageSettings('emailPort', Number(event.target.value))}
+                    />
+                  </div>
+                  <div className="inline-form">
+                    <input
+                      placeholder="SMS Provider"
+                      value={messageSettings.smsProvider}
+                      onChange={(event) => updateMessageSettings('smsProvider', event.target.value)}
+                    />
+                    <input
+                      placeholder="SMS Sign Name"
+                      value={messageSettings.smsSignName}
+                      onChange={(event) => updateMessageSettings('smsSignName', event.target.value)}
+                    />
+                    <input
+                      placeholder="SMS Template Code"
+                      value={messageSettings.smsTemplateCode}
+                      onChange={(event) => updateMessageSettings('smsTemplateCode', event.target.value)}
+                    />
+                    <label className="checkbox-row">
+                      <input
+                        type="checkbox"
+                        checked={messageSettings.emailUseSsl}
+                        onChange={(event) => updateMessageSettings('emailUseSsl', event.target.checked)}
+                      />
+                      Email SSL
+                    </label>
+                    <button type="submit">Save</button>
+                  </div>
+                  <label className="field-label" htmlFor="mail-template">
+                    Mail Template
+                  </label>
+                  <textarea
+                    id="mail-template"
+                    className="json-editor"
+                    rows={3}
+                    value={messageSettings.mailTemplate}
+                    onChange={(event) => updateMessageSettings('mailTemplate', event.target.value)}
+                  />
+                  <label className="field-label" htmlFor="sms-template">
+                    SMS Template
+                  </label>
+                  <textarea
+                    id="sms-template"
+                    className="json-editor"
+                    rows={3}
+                    value={messageSettings.smsTemplate}
+                    onChange={(event) => updateMessageSettings('smsTemplate', event.target.value)}
+                  />
+                </form>
+              </section>
+
+              <section className="detail-panel">
+                <form onSubmit={handleSaveStorageSettings} className="config-form create-section">
+                  <h3>Storage Settings</h3>
+                  <div className="inline-form">
+                    <input
+                      placeholder="Provider"
+                      value={storageSettings.provider}
+                      onChange={(event) => updateStorageSettings('provider', event.target.value)}
+                      required
+                    />
+                    <input
+                      placeholder="Endpoint"
+                      value={storageSettings.endpoint}
+                      onChange={(event) => updateStorageSettings('endpoint', event.target.value)}
+                    />
+                    <input
+                      placeholder="Bucket"
+                      value={storageSettings.bucket}
+                      onChange={(event) => updateStorageSettings('bucket', event.target.value)}
+                    />
+                  </div>
+                  <div className="inline-form">
+                    <input
+                      placeholder="Access Key Id"
+                      value={storageSettings.accessKeyId}
+                      onChange={(event) => updateStorageSettings('accessKeyId', event.target.value)}
+                    />
+                    <input
+                      type="password"
+                      placeholder="Secret Access Key"
+                      value={storageSettings.secretAccessKey}
+                      onChange={(event) => updateStorageSettings('secretAccessKey', event.target.value)}
+                    />
+                    <input
+                      placeholder="Region"
+                      value={storageSettings.region}
+                      onChange={(event) => updateStorageSettings('region', event.target.value)}
+                    />
+                    <button type="submit">Save</button>
+                  </div>
+                </form>
+
+                <form onSubmit={handleSaveGeoIpSettings} className="config-form create-section">
+                  <h3>GeoIP Settings</h3>
+                  <div className="inline-form">
+                    <input
+                      placeholder="Provider"
+                      value={geoIpSettings.provider}
+                      onChange={(event) => updateGeoIpSettings('provider', event.target.value)}
+                      required
+                    />
+                    <input
+                      placeholder="Database Path"
+                      value={geoIpSettings.databasePath}
+                      onChange={(event) => updateGeoIpSettings('databasePath', event.target.value)}
+                    />
+                    <input
+                      placeholder="API Endpoint"
+                      value={geoIpSettings.apiEndpoint}
+                      onChange={(event) => updateGeoIpSettings('apiEndpoint', event.target.value)}
+                    />
+                    <input
+                      type="password"
+                      placeholder="API Token"
+                      value={geoIpSettings.apiToken}
+                      onChange={(event) => updateGeoIpSettings('apiToken', event.target.value)}
+                    />
+                    <label className="checkbox-row">
+                      <input
+                        type="checkbox"
+                        checked={geoIpSettings.enabled}
+                        onChange={(event) => updateGeoIpSettings('enabled', event.target.checked)}
+                      />
+                      Enabled
+                    </label>
+                    <button type="submit">Save</button>
+                  </div>
+                </form>
+              </section>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'monitor' && (
+          <div className="panel">
+            <h2>Session Monitor</h2>
+            <p className="section-hint">View recent login sessions and mark specific session identifiers as revoked.</p>
+            <table>
+              <thead>
+                <tr>
+                  <th>Session ID</th>
+                  <th>User</th>
+                  <th>Event</th>
+                  <th>IP</th>
+                  <th>Time</th>
+                  <th>Revoked</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {monitorSessions.length === 0 && (
+                  <tr>
+                    <td colSpan={7} className="empty-cell">
+                      No monitored sessions found.
+                    </td>
+                  </tr>
+                )}
+                {monitorSessions.map((session) => (
+                  <tr key={`${session.sessionId}-${session.occurredTime}`}>
+                    <td>{session.sessionId}</td>
+                    <td>{session.userName ?? session.userId ?? '-'}</td>
+                    <td>{session.eventType}</td>
+                    <td>{optionOrDash(session.ipAddress)}</td>
+                    <td>{formatDateTime(session.occurredTime)}</td>
+                    <td>{session.revoked ? 'Yes' : 'No'}</td>
+                    <td>
+                      {!session.revoked && (
+                        <button className="danger-btn" onClick={() => void handleRevokeMonitorSession(session)}>
+                          Revoke
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
 

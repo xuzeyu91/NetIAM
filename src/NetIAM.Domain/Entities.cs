@@ -268,6 +268,15 @@ public sealed class ScimAccessTokenEntity : AuditedEntityBase
     public bool IsActive { get; set; } = true;
 }
 
+public sealed class SystemSettingEntity : AuditedEntityBase
+{
+    public string TenantId { get; set; } = string.Empty;
+
+    public string SettingKey { get; set; } = string.Empty;
+
+    public string ValueJson { get; set; } = "{}";
+}
+
 public sealed class IdentitySourceSyncHistoryEntity : AuditedEntityBase
 {
     public string TenantId { get; set; } = string.Empty;

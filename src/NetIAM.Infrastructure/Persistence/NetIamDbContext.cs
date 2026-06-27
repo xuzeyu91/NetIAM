@@ -49,6 +49,8 @@ public sealed class NetIamDbContext(DbContextOptions<NetIamDbContext> options)
 
     public DbSet<ScimAccessTokenEntity> ScimAccessTokens => Set<ScimAccessTokenEntity>();
 
+    public DbSet<SystemSettingEntity> SystemSettings => Set<SystemSettingEntity>();
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
@@ -65,6 +67,7 @@ public sealed class NetIamDbContext(DbContextOptions<NetIamDbContext> options)
         ConfigureSync(builder);
         ConfigureAudit(builder);
         ConfigureSamlScim(builder);
+        ConfigureSystemSettings(builder);
     }
 
     private static void ConfigureIdentity(ModelBuilder builder)
@@ -444,6 +447,19 @@ public sealed class NetIamDbContext(DbContextOptions<NetIamDbContext> options)
             entity.Property(p => p.IsActive).HasColumnName("is_active");
             entity.HasIndex(p => p.TokenHash).IsUnique();
             entity.HasIndex(p => new { p.TenantId, p.Name }).IsUnique();
+            ConfigureAuditedColumns(entity);
+        });
+    }
+
+    private static void ConfigureSystemSettings(ModelBuilder builder)
+    {
+        builder.Entity<SystemSettingEntity>(entity =>
+        {
+            entity.ToTable("eiam_system_setting");
+            entity.Property(p => p.TenantId).HasColumnName("tenant_id").HasMaxLength(64).IsRequired();
+            entity.Property(p => p.SettingKey).HasColumnName("setting_key").HasMaxLength(128).IsRequired();
+            entity.Property(p => p.ValueJson).HasColumnName("value_json").HasColumnType("jsonb").IsRequired();
+            entity.HasIndex(p => new { p.TenantId, p.SettingKey }).IsUnique();
             ConfigureAuditedColumns(entity);
         });
     }

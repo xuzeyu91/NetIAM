@@ -48,6 +48,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IRbacService, RbacService>();
         services.AddScoped<IScimTokenService, ScimTokenService>();
         services.AddScoped<ISamlService, SamlService>();
+        services.AddScoped<ISystemSettingStore, SystemSettingStore>();
         services.AddScoped<IAuthorizationHandler, RbacPermissionAuthorizationHandler>();
         services.AddSingleton<IAuthorizationPolicyProvider, RbacPermissionPolicyProvider>();
         services.AddScoped<INetIamDataSeeder, NetIamDataSeeder>();
